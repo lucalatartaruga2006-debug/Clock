@@ -10,7 +10,7 @@ export const POWER_UPS: Record<PowerUpId, PowerUp> = {
   'lancetta-instabile': { id: 'lancetta-instabile', name: 'Lancetta Instabile', desc: 'Allarga la finestra di tempo per il click perfetto. Le lancette tremano.', icon: '🌀' },
   'batteria-maledetta': { id: 'batteria-maledetta', name: 'Batteria Maledetta', desc: 'Ti permette di sbagliare un click senza morire. Senti una voce nella stanza.', icon: '🔋' },
   'eco-del-secondo': { id: 'eco-del-secondo', name: 'Eco del Secondo', desc: 'Ogni click perfetto genera un "secondo fantasma" che aiuta per pochi secondi.', icon: '👻' },
-  'sveglia-predatrice': { id: 'sveglia-predatrice', name: 'Sveglia Predatrice', desc: 'Più sei vicino alla morte, più velocemente accumuli potere.', icon: '🦅' },
+  'sveglia-predatrice': { id: 'sveglia-predatrice', name: 'Sveglia del Tempo', desc: 'Ogni 10 secondi salta 5 minuti. Ma hai il 2% di possibilità di andare indietro di 50 minuti.', icon: '⏰' },
   'occhio-sul-quadrante': { id: 'occhio-sul-quadrante', name: 'Occhio sul Quadrante', desc: 'Evita 1 attacco del boss. Un utilizzo per boss.', icon: '👁️' },
   'meccanismo-corrotto': { id: 'meccanismo-corrotto', name: 'Meccanismo Corrotto', desc: 'Riduce la difficoltà del ritmo, ma aumenta gli eventi horror casuali.', icon: '⚙️' },
   'campana-demoniaca': { id: 'campana-demoniaca', name: 'Campana Demoniaca', desc: 'Il suono della sveglia danneggia i boss: 10 hp ogni 10 secondi. L\'unico modo per danneggiare i boss.', icon: '🔔' },

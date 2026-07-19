@@ -8,6 +8,7 @@ import {
   playPurchase, playError, playSlowBreath, playFastBreath, playScream, playMerchant, playDodge, playLuckDodge, playRevive,
   preloadFileSounds, playAlarmFile, playZombieScream, startPossessionLoop, stopPossessionLoop,
 } from './audio'
+import { MechanicalClock } from './MechanicalClock'
 import { loadPlayerState, addCurrency, savePlayerState, type PlayerState } from './supabase'
 
 type Phase = 'menu' | 'shop' | 'playing' | 'powerup' | 'boss' | 'merchant' | 'gameover' | 'win' | 'possessed'
@@ -64,6 +65,8 @@ interface GameState {
   merchantSpawnedThisHour: boolean
   // Boss Ora 9: L'Orologio Posseduto — clock-setting mini-game.
   possessed: PossessedState
+  // Sveglia del Tempo: every 10 seconds, skip 5 minutes. 2% chance to go back 50 minutes.
+  svegliaTempoTick: number
 }
 
 function makeInitial(maxHp: number, bellBonus: number, shieldCharges: number, luckBonus: number, extraLives: number): GameState {
@@ -83,6 +86,7 @@ function makeInitial(maxHp: number, bellBonus: number, shieldCharges: number, lu
     merchantSpawnMinute: 1 + Math.floor(Math.random() * 59),
     merchantSpawnedThisHour: false,
     possessed: { round: 0, totalRounds: 5, targetHour: 0, targetMinute: 0, playerHour: 0, playerMinute: 0, deadline: 0, active: false, result: 'pending', jumpscare: false, defeated: false, glitch: 0 },
+    svegliaTempoTick: 0,
   }
 }
 
@@ -267,8 +271,10 @@ export default function App() {
               s.hp = Math.max(0, s.hp - 50)
               playDamage(); playZombieScream()
               flash('⏰ Troppo lento! -50 HP')
-              if (s.hp <= 0) { handleDeath(); render(); rafRef.current = requestAnimationFrame(loop); return }
-              setTimeout(() => { nextPossessedRound() }, 1200)
+              if (s.hp <= 0) { handleDeath() }
+              setTimeout(() => {
+                if (stateRef.current.phase === 'boss' && stateRef.current.bossType === 'orologio-posseduto') nextPossessedRound()
+              }, 1200)
             }
           }
           if (s.possessed.glitch > 0) s.possessed.glitch = Math.max(0, s.possessed.glitch - 0.02)
@@ -340,6 +346,20 @@ export default function App() {
         if (s.owned.includes('lancetta-fantasma') && Math.random() < 0.3) handleAutoClick()
         const horrorChance = s.owned.includes('meccanismo-corrotto') ? 0.08 : 0.03
         if (Math.random() < horrorChance) triggerHorrorEvent()
+        // Sveglia del Tempo: every 10 seconds, skip 5 minutes. 2% chance to go back 50 minutes.
+        if (s.owned.includes('sveglia-predatrice')) {
+          s.svegliaTempoTick++
+          if (s.svegliaTempoTick % 10 === 0) {
+            if (Math.random() < 0.02) {
+              s.minute = Math.max(0, s.minute - 50)
+              flash('⏰ Sveglia del Tempo: indietro di 50 minuti!')
+            } else {
+              s.minute += 5
+              if (s.minute >= 60) { s.minute -= 60; onHourRollover() }
+              flash('⏰ Sveglia del Tempo: +5 minuti')
+            }
+          }
+        }
         if (s.minute >= 60) { s.minute -= 60; onHourRollover() }
         maybeSpawnMerchant()
       }
@@ -449,7 +469,6 @@ export default function App() {
       maybeSpawnMerchant()
       playClick(true); setLastPerfect(true)
       if (s.owned.includes('eco-del-secondo')) { s.ghostSeconds++; s.ghostSecondsEnd = now + 3000 }
-      if (s.owned.includes('sveglia-predatrice') && s.hp < 40) { s.hp = Math.min(s.maxHp, s.hp + 0.5) }
       syncUI()
     } else if (offset > s.perfectWindow * 2) {
       playClick(false); setLastPerfect(false)
@@ -583,13 +602,13 @@ export default function App() {
 
   const leaveMerchant = () => {
     const s = stateRef.current
-    s.phase = 'playing'; s.secondStart = performance.now(); s.minute = 0; s.lastClickBeat = -1
+    s.phase = 'playing'; s.secondStart = performance.now(); s.lastClickBeat = -1
     syncUI()
   }
 
   const choosePowerup = (id: PowerUpId) => {
     const s = stateRef.current; s.owned.push(id); applyPowerupEffects(id)
-    s.phase = 'playing'; s.secondStart = performance.now(); s.minute = 0; s.lastClickBeat = -1
+    s.phase = 'playing'; s.secondStart = performance.now(); s.lastClickBeat = -1
     syncUI()
   }
 
@@ -632,7 +651,7 @@ export default function App() {
       ...s.possessed,
       round, targetHour, targetMinute,
       playerHour: 12, playerMinute: 0,
-      deadline: performance.now() + 5000,
+      deadline: performance.now() + 10000,
       active: true, result: 'pending', glitch: 0,
     }
     setPossessedState({ ...s.possessed })
@@ -687,11 +706,14 @@ export default function App() {
       s.hp = Math.max(0, s.hp - 50)
       playDamage(); playZombieScream()
       flash('✗ Sbagliato! Era ' + s.possessed.targetHour + ':' + (s.possessed.targetMinute < 10 ? '0' : '') + s.possessed.targetMinute + ' — -50 HP')
-      if (s.hp <= 0) { handleDeath(); return }
+      if (s.hp <= 0) { handleDeath() }
     }
     setPossessedState({ ...s.possessed })
     setBossHp(s.bossHp)
-    setTimeout(() => { nextPossessedRound() }, 1200)
+    // Always schedule the next round, even after revive — prevents softlock.
+    setTimeout(() => {
+      if (stateRef.current.phase === 'boss' && stateRef.current.bossType === 'orologio-posseduto') nextPossessedRound()
+    }, 1200)
   }
 
   const startGame = () => {
@@ -835,33 +857,18 @@ export default function App() {
             </div>
           )}
 
-          {/* Bottom: clock-setting controls */}
+          {/* Bottom: mechanical clock with draggable hands */}
           {possessedState.active && possessedState.result === 'pending' && (
-            <div className="w-full max-w-sm">
-              {/* Player's clock preview */}
-              <div className="flex items-center justify-center gap-6 mb-4">
-                <div className="text-center">
-                  <div className="text-bone/50 text-xs mb-1">Ora</div>
-                  <div className="font-clock text-bone text-3xl">{possessedState.playerHour}</div>
-                  <div className="flex gap-2 mt-1">
-                    <button onClick={() => adjustPossessedHand('hour', -1)}
-                      className="bg-zinc-800 hover:bg-red-900/50 text-bone w-10 h-10 rounded border border-red-700/40 text-lg">−</button>
-                    <button onClick={() => adjustPossessedHand('hour', 1)}
-                      className="bg-zinc-800 hover:bg-red-900/50 text-bone w-10 h-10 rounded border border-red-700/40 text-lg">+</button>
-                  </div>
-                </div>
-                <div className="text-bone/30 text-3xl">:</div>
-                <div className="text-center">
-                  <div className="text-bone/50 text-xs mb-1">Minuti</div>
-                  <div className="font-clock text-bone text-3xl">{possessedState.playerMinute < 10 ? '0' : ''}{possessedState.playerMinute}</div>
-                  <div className="flex gap-2 mt-1">
-                    <button onClick={() => adjustPossessedHand('minute', -5)}
-                      className="bg-zinc-800 hover:bg-red-900/50 text-bone w-10 h-10 rounded border border-red-700/40 text-lg">−</button>
-                    <button onClick={() => adjustPossessedHand('minute', 5)}
-                      className="bg-zinc-800 hover:bg-red-900/50 text-bone w-10 h-10 rounded border border-red-700/40 text-lg">+</button>
-                  </div>
-                </div>
-              </div>
+            <div className="w-full max-w-sm flex flex-col items-center gap-3">
+              <div className="text-bone/50 text-xs text-center">Trascina le lancette per impostare l'orario</div>
+              <MechanicalClock
+                hour={possessedState.playerHour}
+                minute={possessedState.playerMinute}
+                onHourChange={(h) => { stateRef.current.possessed.playerHour = h; setPossessedState({ ...stateRef.current.possessed }); playTick() }}
+                onMinuteChange={(m) => { stateRef.current.possessed.playerMinute = m; setPossessedState({ ...stateRef.current.possessed }); playTick() }}
+                size={240}
+              />
+              <div className="font-clock text-bone text-lg">{possessedState.playerHour}:{possessedState.playerMinute < 10 ? '0' : ''}{possessedState.playerMinute}</div>
               <button onClick={submitPossessedAnswer}
                 className="w-full bg-red-700 hover:bg-red-600 text-bone py-3 rounded-lg font-clock tracking-widest border border-red-400/50 transition-all hover:scale-105">
                 CONFERMA ORARIO
