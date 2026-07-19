@@ -319,8 +319,8 @@ export function playLuckDodge() {
 // File-based sound effects (loaded once, cached).
 let alarmBuffer: AudioBuffer | null = null
 let zombieBuffer: AudioBuffer | null = null
-let alarmLoading: Promise<void> | null = null
-let zombieLoading: Promise<void> | null = null
+let alarmDone = false
+let zombieDone = false
 
 function loadBuffer(url: string, slot: 'alarm' | 'zombie'): Promise<void> {
   if (!ctx) return Promise.resolve()
@@ -329,17 +329,18 @@ function loadBuffer(url: string, slot: 'alarm' | 'zombie'): Promise<void> {
     .then((data) => ctx!.decodeAudioData(data))
     .then((buf) => { if (slot === 'alarm') alarmBuffer = buf; else zombieBuffer = buf })
     .catch(() => {})
+    .then(() => { if (slot === 'alarm') alarmDone = true; else zombieDone = true })
 }
 
 export function preloadFileSounds() {
   if (!ctx) return
-  if (!alarmLoading) alarmLoading = loadBuffer(alarmUrl, 'alarm')
-  if (!zombieLoading) zombieLoading = loadBuffer(zombieUrl, 'zombie')
+  if (!alarmDone && !alarmBuffer) loadBuffer(alarmUrl, 'alarm')
+  if (!zombieDone && !zombieBuffer) loadBuffer(zombieUrl, 'zombie')
 }
 
 export function playAlarmFile() {
   if (!ctx || !master) return
-  if (alarmLoading) { alarmLoading.then(() => playAlarmFile()); return }
+  if (!alarmDone) { playAlarmBuzz(2.5); return }
   if (!alarmBuffer) { playAlarmBuzz(2.5); return }
   const src = ctx.createBufferSource(); src.buffer = alarmBuffer
   const g = ctx.createGain(); g.gain.value = 0.7
@@ -348,7 +349,7 @@ export function playAlarmFile() {
 
 export function playZombieScream() {
   if (!ctx || !master) return
-  if (zombieLoading) { zombieLoading.then(() => playZombieScream()); return }
+  if (!zombieDone) { playScream(); return }
   if (!zombieBuffer) { playScream(); return }
   const src = ctx.createBufferSource(); src.buffer = zombieBuffer
   const g = ctx.createGain(); g.gain.value = 0.8

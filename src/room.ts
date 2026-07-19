@@ -19,6 +19,7 @@ export interface RenderOpts {
   breathPhase: 'slow' | 'fast' | 'none'
   breathIntensity: number
   merchantActive: boolean
+  secondProgress: number
 }
 
 const VW = 180
@@ -165,7 +166,7 @@ function drawClockPixel(ctx: CanvasRenderingContext2D, cx: number, cy: number, o
   drawHand(ctx, cx, cy, hourAngle, 4, C.hand)
   const minAngle = (o.minute / 60) * Math.PI * 2 - Math.PI / 2
   drawHand(ctx, cx, cy, minAngle, 6, C.hand)
-  const secAngle = (o.minute / 60) * Math.PI * 2 - Math.PI / 2
+  const secAngle = (o.secondProgress / 60) * Math.PI * 2 - Math.PI / 2
   drawHand(ctx, cx, cy, secAngle, 7, C.secHand)
   px(ctx, cx, cy, 1, 1, C.hand)
   px(ctx, cx, cy, 1, 1, C.secHand)

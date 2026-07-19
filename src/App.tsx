@@ -337,6 +337,7 @@ export default function App() {
       proprietarioActive: s.bossType === 'proprietario',
       breathPhase: s.breathPhase, breathIntensity: s.breathIntensity,
       merchantActive: s.phase === 'merchant',
+      secondProgress: ((performance.now() - s.secondStart) / SECOND_MS) % 60,
     }, W, H)
   }
 
@@ -613,7 +614,7 @@ export default function App() {
   const hasOcchio = owned.includes('occhio-sul-quadrante')
 
   return (
-    <div className="w-screen h-screen relative overflow-hidden bg-black font-clock">
+    <div className="w-screen relative overflow-hidden bg-black font-clock" style={{ height: '100dvh' }}>
       <canvas ref={canvasRef} onClick={onCanvasClick}
         className={`w-full h-full ${(phase === 'playing' || phase === 'boss') ? 'cursor-crosshair' : 'cursor-default'}`} />
 
