@@ -20,6 +20,14 @@ export interface RenderOpts {
   breathIntensity: number
   merchantActive: boolean
   secondProgress: number
+  possessedActive: boolean
+  possessedJumpscare: boolean
+  possessedDefeated: boolean
+  possessedGlitch: number
+  possessedTargetHour: number
+  possessedTargetMinute: number
+  possessedPlayerHour: number
+  possessedPlayerMinute: number
 }
 
 const VW = 180
@@ -102,12 +110,15 @@ function drawScene(ctx: CanvasRenderingContext2D, o: RenderOpts) {
   drawClockPixel(ctx, clockX, clockCY, o)
 
   if (o.proprietarioActive) drawProprietarioPixel(ctx, o)
+  else if (o.possessedActive) drawPossessedBossPixel(ctx, o)
   else if (o.bossActive) drawBossPixel(ctx, clockX, clockCY, o)
 
   if (o.merchantActive) drawMerchantPixel(ctx)
 
+  if (o.possessedJumpscare) drawJumpscarePixel(ctx)
   if (o.crackIntensity > 0) drawCracksPixel(ctx, o.crackIntensity)
-  drawVignette(ctx, o.hour, o.bossActive || o.proprietarioActive)
+  if (o.possessedGlitch > 0) drawGlitchPixel(ctx, o.possessedGlitch)
+  drawVignette(ctx, o.hour, o.bossActive || o.proprietarioActive || o.possessedActive)
   drawDust(ctx)
 }
 
@@ -256,6 +267,90 @@ function drawProprietarioPixel(ctx: CanvasRenderingContext2D, o: RenderOpts) {
   ctx.fillStyle = '#000'
   ctx.beginPath(); ctx.arc(baseX, bodyTop + 10, 26, 0, Math.PI * 2); ctx.fill()
   ctx.restore()
+}
+
+function drawPossessedBossPixel(ctx: CanvasRenderingContext2D, o: RenderOpts) {
+  // Inside the clock mechanism — gears and red eyes floating above
+  const t = Date.now() / 1000
+  const cx = Math.round(VW / 2)
+  const cy = Math.round(VH * 0.35)
+  // Dark mechanism background
+  ctx.fillStyle = 'rgba(10,5,15,0.6)'; ctx.fillRect(0, 0, VW, VH)
+  // Gear teeth rotating
+  for (let g = 0; g < 3; g++) {
+    const gx = cx + (g - 1) * 30
+    const gy = cy + 20 + Math.sin(t * 0.5 + g) * 3
+    const gr = 8 + g * 2
+    ctx.strokeStyle = `rgba(60,40,60,0.4)`; ctx.lineWidth = 1
+    ctx.beginPath(); ctx.arc(gx, gy, gr, 0, Math.PI * 2); ctx.stroke()
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2 + t * (g % 2 ? 1 : -1) * 0.5
+      px(ctx, gx + Math.round(Math.cos(a) * gr), gy + Math.round(Math.sin(a) * gr), 1, 1, 'rgba(80,50,80,0.5)')
+    }
+  }
+  // Two red eyes floating above
+  const eyeY = cy - 15 + Math.sin(t * 2) * 2
+  const eyePulse = 0.7 + Math.sin(t * 4) * 0.3
+  ctx.fillStyle = `rgba(255,20,20,${eyePulse})`
+  drawPixelCircle(ctx, cx - 6, eyeY, 3, `rgba(200,10,10,${eyePulse})`)
+  drawPixelCircle(ctx, cx + 6, eyeY, 3, `rgba(200,10,10,${eyePulse})`)
+  px(ctx, cx - 6, eyeY, 2, 2, `rgba(255,40,40,${eyePulse})`)
+  px(ctx, cx + 6, eyeY, 2, 2, `rgba(255,40,40,${eyePulse})`)
+  // Glowing aura around eyes
+  ctx.save(); ctx.globalAlpha = 0.15 * eyePulse
+  ctx.fillStyle = '#ff0000'
+  ctx.beginPath(); ctx.arc(cx - 6, eyeY, 8, 0, Math.PI * 2); ctx.fill()
+  ctx.beginPath(); ctx.arc(cx + 6, eyeY, 8, 0, Math.PI * 2); ctx.fill()
+  ctx.restore()
+  // Target clock face showing what player set
+  const fcx = cx, fcy = VH - 30
+  drawPixelCircle(ctx, fcx, fcy, 12, C.clockRedDark)
+  drawPixelCircle(ctx, fcx, fcy, 10, C.face)
+  px(ctx, fcx, fcy - 8, 1, 1, C.faceLine)
+  px(ctx, fcx + 8, fcy, 1, 1, C.faceLine)
+  px(ctx, fcx, fcy + 8, 1, 1, C.faceLine)
+  px(ctx, fcx - 8, fcy, 1, 1, C.faceLine)
+  const phAngle = (o.possessedPlayerHour / 12) * Math.PI * 2 - Math.PI / 2
+  drawHand(ctx, fcx, fcy, phAngle, 4, C.hand)
+  const pmAngle = (o.possessedPlayerMinute / 60) * Math.PI * 2 - Math.PI / 2
+  drawHand(ctx, fcx, fcy, pmAngle, 6, C.secHand)
+  px(ctx, fcx, fcy, 1, 1, C.hand)
+}
+
+function drawJumpscarePixel(ctx: CanvasRenderingContext2D) {
+  // Full-screen red eyes in darkness — jumpscare
+  const t = Date.now() / 1000
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, VW, VH)
+  const cx = Math.round(VW / 2), cy = Math.round(VH / 2)
+  const pulse = 0.8 + Math.sin(t * 8) * 0.2
+  // Large red eyes
+  ctx.fillStyle = `rgba(255,0,0,${pulse})`
+  drawPixelCircle(ctx, cx - 10, cy, 6, `rgba(200,0,0,${pulse})`)
+  drawPixelCircle(ctx, cx + 10, cy, 6, `rgba(200,0,0,${pulse})`)
+  drawPixelCircle(ctx, cx - 10, cy, 4, `rgba(255,40,40,${pulse})`)
+  drawPixelCircle(ctx, cx + 10, cy, 4, `rgba(255,40,40,${pulse})`)
+  px(ctx, cx - 10, cy, 3, 3, `rgba(255,80,80,${pulse})`)
+  px(ctx, cx + 10, cy, 3, 3, `rgba(255,80,80,${pulse})`)
+  // Glow
+  ctx.save(); ctx.globalAlpha = 0.2 * pulse; ctx.fillStyle = '#ff0000'
+  ctx.beginPath(); ctx.arc(cx - 10, cy, 14, 0, Math.PI * 2); ctx.fill()
+  ctx.beginPath(); ctx.arc(cx + 10, cy, 14, 0, Math.PI * 2); ctx.fill()
+  ctx.restore()
+}
+
+function drawGlitchPixel(ctx: CanvasRenderingContext2D, intensity: number) {
+  const n = Math.floor(intensity * 20) + 5
+  for (let i = 0; i < n; i++) {
+    const y = (i * 17) % VH
+    const h = 1 + (i % 3)
+    const x = (i * 53) % VW
+    ctx.fillStyle = `rgba(255,0,0,${intensity * 0.3})`
+    ctx.fillRect(x, y, 2 + (i % 5), h)
+  }
+  if (intensity > 0.5) {
+    ctx.fillStyle = `rgba(0,0,0,${(intensity - 0.5) * 0.4})`
+    ctx.fillRect(0, 0, VW, VH)
+  }
 }
 
 function drawMerchantPixel(ctx: CanvasRenderingContext2D) {

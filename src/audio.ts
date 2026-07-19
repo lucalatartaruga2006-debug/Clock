@@ -1,5 +1,6 @@
 import alarmUrl from './assets/audio/freesound_community-generic-alarm-clock-86759.mp3'
 import zombieUrl from './assets/audio/dragon-studio-zombie-screech-sound-effect-312865.mp3'
+import possessionUrl from './assets/audio/freesound_community-moan-12-you-are-all-mine-echo-low-pitch-34521.mp3'
 
 let ctx: AudioContext | null = null
 let master: GainNode | null = null
@@ -319,23 +320,51 @@ export function playLuckDodge() {
 // File-based sound effects (loaded once, cached).
 let alarmBuffer: AudioBuffer | null = null
 let zombieBuffer: AudioBuffer | null = null
+let possessionBuffer: AudioBuffer | null = null
 let alarmDone = false
 let zombieDone = false
+let possessionDone = false
+let possessionSrc: AudioBufferSourceNode | null = null
+let possessionGain: GainNode | null = null
 
-function loadBuffer(url: string, slot: 'alarm' | 'zombie'): Promise<void> {
+function loadBuffer(url: string, slot: 'alarm' | 'zombie' | 'possession'): Promise<void> {
   if (!ctx) return Promise.resolve()
   return fetch(url)
     .then((r) => r.arrayBuffer())
     .then((data) => ctx!.decodeAudioData(data))
-    .then((buf) => { if (slot === 'alarm') alarmBuffer = buf; else zombieBuffer = buf })
+    .then((buf) => {
+      if (slot === 'alarm') alarmBuffer = buf
+      else if (slot === 'zombie') zombieBuffer = buf
+      else possessionBuffer = buf
+    })
     .catch(() => {})
-    .then(() => { if (slot === 'alarm') alarmDone = true; else zombieDone = true })
+    .then(() => {
+      if (slot === 'alarm') alarmDone = true
+      else if (slot === 'zombie') zombieDone = true
+      else possessionDone = true
+    })
 }
 
 export function preloadFileSounds() {
   if (!ctx) return
   if (!alarmDone && !alarmBuffer) loadBuffer(alarmUrl, 'alarm')
   if (!zombieDone && !zombieBuffer) loadBuffer(zombieUrl, 'zombie')
+  if (!possessionDone && !possessionBuffer) loadBuffer(possessionUrl, 'possession')
+}
+
+export function startPossessionLoop() {
+  if (!ctx || !master) return
+  if (!possessionDone || !possessionBuffer) { loadBuffer(possessionUrl, 'possession').then(() => { if (possessionBuffer) startPossessionLoop() }); return }
+  stopPossessionLoop()
+  const src = ctx.createBufferSource(); src.buffer = possessionBuffer; src.loop = true
+  const g = ctx.createGain(); g.gain.value = 0.35
+  src.connect(g).connect(master); src.start()
+  possessionSrc = src; possessionGain = g
+}
+
+export function stopPossessionLoop() {
+  if (possessionSrc) { try { possessionSrc.stop() } catch {} ; possessionSrc = null }
+  possessionGain = null
 }
 
 export function playAlarmFile() {

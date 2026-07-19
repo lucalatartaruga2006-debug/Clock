@@ -6,13 +6,23 @@ import {
   initAudio, resumeAudio, playTick, playFakeTick, playClick, playDamage,
   playAlarmBuzz, playBell, playWhisper, playPowerup, playGameOver,
   playPurchase, playError, playSlowBreath, playFastBreath, playScream, playMerchant, playDodge, playLuckDodge, playRevive,
-  preloadFileSounds, playAlarmFile, playZombieScream,
+  preloadFileSounds, playAlarmFile, playZombieScream, startPossessionLoop, stopPossessionLoop,
 } from './audio'
 import { loadPlayerState, addCurrency, savePlayerState, type PlayerState } from './supabase'
 
-type Phase = 'menu' | 'shop' | 'playing' | 'powerup' | 'boss' | 'merchant' | 'gameover' | 'win'
-type BossType = 'ticchettio' | 'proprietario' | null
+type Phase = 'menu' | 'shop' | 'playing' | 'powerup' | 'boss' | 'merchant' | 'gameover' | 'win' | 'possessed'
+type BossType = 'ticchettio' | 'proprietario' | 'orologio-posseduto' | null
 type BreathPhase = 'slow' | 'fast' | 'none'
+
+interface PossessedRound {
+  targetHour: number; targetMinute: number; round: number; totalRounds: number
+  deadline: number; playerHour: number; playerMinute: number; active: boolean; result: 'pending' | 'correct' | 'wrong'
+}
+interface PossessedState {
+  round: number; totalRounds: number; targetHour: number; targetMinute: number
+  playerHour: number; playerMinute: number; deadline: number; active: boolean; result: 'pending' | 'correct' | 'wrong'
+  jumpscare: boolean; defeated: boolean; glitch: number
+}
 
 const BASE_MAX_HP = 100
 const TOTAL_HOURS = 12
@@ -52,6 +62,8 @@ interface GameState {
   // Merchant now spawns at a random minute within the hour instead of only on hour rollover.
   merchantSpawnMinute: number
   merchantSpawnedThisHour: boolean
+  // Boss Ora 9: L'Orologio Posseduto — clock-setting mini-game.
+  possessed: PossessedState
 }
 
 function makeInitial(maxHp: number, bellBonus: number, shieldCharges: number, luckBonus: number, extraLives: number): GameState {
@@ -70,6 +82,7 @@ function makeInitial(maxHp: number, bellBonus: number, shieldCharges: number, lu
     extraLives,
     merchantSpawnMinute: 1 + Math.floor(Math.random() * 59),
     merchantSpawnedThisHour: false,
+    possessed: { round: 0, totalRounds: 5, targetHour: 0, targetMinute: 0, playerHour: 0, playerMinute: 0, deadline: 0, active: false, result: 'pending', jumpscare: false, defeated: false, glitch: 0 },
   }
 }
 
@@ -86,6 +99,7 @@ export default function App() {
   const [powerupChoices, setPowerupChoices] = useState<PowerUpId[]>([])
   const [bossHp, setBossHp] = useState(BOSS_HP)
   const [bossName, setBossName] = useState<string>('')
+  const [bossType, setBossType] = useState<BossType>(null)
   const [feedback, setFeedback] = useState<string>('')
   const [lastPerfect, setLastPerfect] = useState<boolean | null>(null)
   const [slowMo, setSlowMo] = useState(false)
@@ -94,6 +108,7 @@ export default function App() {
   const [occhioArmed, setOcchioArmed] = useState(false)
   const [luckPercent, setLuckPercent] = useState(0)
   const [extraLives, setExtraLives] = useState(0)
+  const [possessedState, setPossessedState] = useState<PossessedState>({ round: 0, totalRounds: 5, targetHour: 0, targetMinute: 0, playerHour: 0, playerMinute: 0, deadline: 0, active: false, result: 'pending', jumpscare: false, defeated: false, glitch: 0 })
 
   const [player, setPlayer] = useState<PlayerState | null>(null)
   const [playerLoading, setPlayerLoading] = useState(true)
@@ -120,13 +135,14 @@ export default function App() {
     setMaxHp(s.maxHp)
     setHour(s.hour); setMinute(s.minute); setOwned([...s.owned])
     setBossHp(Math.max(0, Math.round(s.bossHp)))
-    setPhase(s.phase); setBossName(s.bossName ?? '')
+    setPhase(s.phase); setBossName(s.bossName ?? ''); setBossType(s.bossType)
     setSlowMo(s.tempoRubatoActive)
     setBreathPhase(s.breathPhase)
     setMerchantState({ heart: s.merchantHeart, shield: s.merchantShield, powerup: s.merchantPowerup })
     setOcchioArmed(s.occhioArmed)
     setLuckPercent(s.luckPercent)
     setExtraLives(s.extraLives)
+    setPossessedState({ ...s.possessed })
   }, [])
 
   const flash = (msg: string) => { setFeedback(msg); setTimeout(() => setFeedback(''), 1800) }
@@ -188,6 +204,7 @@ export default function App() {
   const gameOver = useCallback(() => {
     const s = stateRef.current
     s.phase = 'gameover'
+    stopPossessionLoop()
     playScream()
     setTimeout(() => playGameOver(), 300)
     if (s.runCurrency > 0) {
@@ -225,12 +242,12 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    if (phase === 'menu' || phase === 'gameover' || phase === 'win' || phase === 'shop' || phase === 'merchant') return
+    if (phase === 'menu' || phase === 'gameover' || phase === 'win' || phase === 'shop' || phase === 'merchant' || phase === 'possessed') return
     let lastSecond = -1
     let lastHalfSecond = -1
     const loop = () => {
       const s = stateRef.current
-      if (s.phase !== 'playing' && s.phase !== 'boss') { render(); rafRef.current = requestAnimationFrame(loop); return }
+      if (s.phase !== 'playing' && s.phase !== 'boss' && s.phase !== 'possessed') { render(); rafRef.current = requestAnimationFrame(loop); return }
       const now = performance.now()
 
       // During boss fights, the clock does NOT advance — time is frozen.
@@ -239,6 +256,27 @@ export default function App() {
       // (10 HP every 10 seconds). Clicks do NOT damage the boss — they only
       // keep you alive (missed clicks hurt you, perfect clicks do nothing to the boss).
       if (s.phase === 'boss') {
+        if (s.bossType === 'orologio-posseduto') {
+          // Possessed boss: handle mini-game timing
+          if (s.possessed.active && s.possessed.result === 'pending') {
+            if (now >= s.possessed.deadline) {
+              // Time's up — player took too long
+              s.possessed.result = 'wrong'
+              s.possessed.active = false
+              s.possessed.glitch = 1
+              s.hp = Math.max(0, s.hp - 50)
+              playDamage(); playZombieScream()
+              flash('⏰ Troppo lento! -50 HP')
+              if (s.hp <= 0) { handleDeath(); render(); rafRef.current = requestAnimationFrame(loop); return }
+              setTimeout(() => { nextPossessedRound() }, 1200)
+            }
+          }
+          if (s.possessed.glitch > 0) s.possessed.glitch = Math.max(0, s.possessed.glitch - 0.02)
+          syncUI()
+          render()
+          rafRef.current = requestAnimationFrame(loop)
+          return
+        }
         if (s.bossType === 'proprietario' && s.breathPhase !== 'none') {
           const breathInterval = s.breathPhase === 'slow' ? 2200 : 700
           if (now - s.lastBreathSound > breathInterval) {
@@ -279,6 +317,7 @@ export default function App() {
           s.bossType = null; s.breathPhase = 'none'; s.breathTimeScale = 1
           s.occhioAvailable = false; s.occhioArmed = false
           s.secondStart = now; s.lastClickBeat = -1
+          if (s.possessed.jumpscare) { stopPossessionLoop(); s.possessed = { ...s.possessed, jumpscare: false, defeated: true, active: false } }
           flash('Hai sconfitto ' + (s.bossName ?? '') + '!'); playZombieScream(); playPowerup(); syncUI()
         }
         render()
@@ -338,6 +377,14 @@ export default function App() {
       breathPhase: s.breathPhase, breathIntensity: s.breathIntensity,
       merchantActive: s.phase === 'merchant',
       secondProgress: ((performance.now() - s.secondStart) / SECOND_MS) % 60,
+      possessedActive: s.bossType === 'orologio-posseduto' && s.phase === 'boss' && !s.possessed.jumpscare,
+      possessedJumpscare: s.possessed.jumpscare && s.bossType === 'orologio-posseduto',
+      possessedDefeated: s.possessed.defeated,
+      possessedGlitch: s.possessed.glitch,
+      possessedTargetHour: s.possessed.targetHour,
+      possessedTargetMinute: s.possessed.targetMinute,
+      possessedPlayerHour: s.possessed.playerHour,
+      possessedPlayerMinute: s.possessed.playerMinute,
     }, W, H)
   }
 
@@ -359,6 +406,9 @@ export default function App() {
     const s = stateRef.current
     if (s.phase !== 'playing' && s.phase !== 'boss') return
     const now = performance.now()
+
+    // During the possessed boss, the mini-game uses on-screen buttons, not canvas clicks.
+    if (s.phase === 'boss' && s.bossType === 'orologio-posseduto') return
 
     // During boss fights, clicks keep you alive but do NOT damage the boss.
     // The boss can only be damaged by the Campana Demoniaca power-up.
@@ -458,6 +508,24 @@ export default function App() {
       s.lastBreathSound = performance.now()
       playSlowBreath()
       flash('BOSS: ' + s.bossName + ' — la luce si spegne. Respira...')
+    } else if (s.hour === 9) {
+      // Boss Ora 9: L'Orologio Posseduto — jumpscare then clock-setting mini-game
+      s.bossType = 'orologio-posseduto'
+      s.bossName = "L'Orologio Posseduto"
+      s.bossHp = BOSS_HP
+      s.lightOn = false
+      s.possessed = { round: 0, totalRounds: 5, targetHour: 0, targetMinute: 0, playerHour: 0, playerMinute: 0, deadline: 0, active: false, result: 'pending', jumpscare: true, defeated: false, glitch: 0 }
+      syncUI()
+      // Jumpscare sequence: screen cracks, scream, red eyes, then possession sound
+      playZombieScream()
+      setTimeout(() => { startPossessionLoop() }, 800)
+      flash('BOSS: ' + s.bossName + ' — lo schermo si rompe!')
+      // After jumpscare, start the first round
+      setTimeout(() => {
+        const ps = stateRef.current.possessed
+        ps.jumpscare = false
+        startPossessedRound()
+      }, 2500)
     } else {
       s.bossType = 'ticchettio'
       s.bossName = 'Il Ticchettio'
@@ -550,6 +618,82 @@ export default function App() {
     flash('Occhio sul Quadrante: pronto a schivare il prossimo attacco.'); syncUI()
   }
 
+  // === Boss Ora 9: L'Orologio Posseduto — clock-setting mini-game ===
+  const startPossessedRound = () => {
+    const s = stateRef.current
+    if (s.bossType !== 'orologio-posseduto') return
+    const round = s.possessed.round + 1
+    // Difficulty increases: round 1-2 = whole hours, 3-4 = quarter hours, 5 = random minute
+    let targetHour: number, targetMinute: number
+    if (round <= 2) { targetHour = 1 + Math.floor(Math.random() * 12); targetMinute = 0 }
+    else if (round <= 4) { targetHour = 1 + Math.floor(Math.random() * 12); targetMinute = [0, 15, 30, 45][Math.floor(Math.random() * 4)] }
+    else { targetHour = 1 + Math.floor(Math.random() * 12); targetMinute = Math.floor(Math.random() * 60) }
+    s.possessed = {
+      ...s.possessed,
+      round, targetHour, targetMinute,
+      playerHour: 12, playerMinute: 0,
+      deadline: performance.now() + 5000,
+      active: true, result: 'pending', glitch: 0,
+    }
+    setPossessedState({ ...s.possessed })
+    flash('Round ' + round + '/5 — Imposta le lancette su: ' + targetHour + ':' + (targetMinute < 10 ? '0' : '') + targetMinute)
+    syncUI()
+  }
+
+  const nextPossessedRound = () => {
+    const s = stateRef.current
+    if (s.possessed.round >= s.possessed.totalRounds) {
+      // All rounds done — boss defeated
+      s.bossHp = 0
+      s.possessed.defeated = true
+      s.possessed.active = false
+      stopPossessionLoop()
+      playZombieScream()
+      flash("L'Orologio Posseduto si spezza! Gli occhi rossi svaniscono...")
+      s.phase = 'playing'; s.lightOn = true; s.flickerUntil = 0
+      s.bossType = null; s.breathPhase = 'none'; s.breathTimeScale = 1
+      s.secondStart = performance.now(); s.lastClickBeat = -1
+      setPhase('playing'); syncUI()
+      return
+    }
+    startPossessedRound()
+  }
+
+  const adjustPossessedHand = (which: 'hour' | 'minute', delta: number) => {
+    const s = stateRef.current
+    if (!s.possessed.active || s.possessed.result !== 'pending') return
+    if (which === 'hour') {
+      s.possessed.playerHour = ((s.possessed.playerHour - 1 + delta) % 12) + 1
+    } else {
+      s.possessed.playerMinute = (s.possessed.playerMinute + delta + 60) % 60
+    }
+    setPossessedState({ ...s.possessed })
+    playTick()
+  }
+
+  const submitPossessedAnswer = () => {
+    const s = stateRef.current
+    if (!s.possessed.active || s.possessed.result !== 'pending') return
+    const correct = s.possessed.playerHour === s.possessed.targetHour && s.possessed.playerMinute === s.possessed.targetMinute
+    s.possessed.active = false
+    if (correct) {
+      s.possessed.result = 'correct'
+      s.bossHp = Math.max(0, s.bossHp - 20)
+      playBell(); playPowerup()
+      flash('✓ Corretto! -20 HP al boss')
+    } else {
+      s.possessed.result = 'wrong'
+      s.possessed.glitch = 1
+      s.hp = Math.max(0, s.hp - 50)
+      playDamage(); playZombieScream()
+      flash('✗ Sbagliato! Era ' + s.possessed.targetHour + ':' + (s.possessed.targetMinute < 10 ? '0' : '') + s.possessed.targetMinute + ' — -50 HP')
+      if (s.hp <= 0) { handleDeath(); return }
+    }
+    setPossessedState({ ...s.possessed })
+    setBossHp(s.bossHp)
+    setTimeout(() => { nextPossessedRound() }, 1200)
+  }
+
   const startGame = () => {
     initAudio(); resumeAudio()
     preloadFileSounds()
@@ -564,7 +708,7 @@ export default function App() {
     const s = stateRef.current
     s.phase = 'playing'; s.secondStart = performance.now(); s.lastClickBeat = -1
     setPhase('playing'); setHp(s.maxHp); setMaxHp(s.maxHp); setHour(1); setMinute(0); setOwned([])
-    setBossHp(BOSS_HP); setBossName(''); setLastPerfect(null); setPowerupChoices([])
+    setBossHp(BOSS_HP); setBossName(''); setBossType(null); setLastPerfect(null); setPowerupChoices([])
     setBreathPhase('none'); setOcchioArmed(false); setLuckPercent(s.luckPercent); setExtraLives(s.extraLives)
   }
 
@@ -644,7 +788,7 @@ export default function App() {
         </div>
       )}
 
-      {phase === 'boss' && (
+      {phase === 'boss' && bossType !== 'orologio-posseduto' && (
         <div className="absolute top-20 left-1/2 -translate-x-1/2 pointer-events-none">
           <div className="text-blood font-horror text-3xl tracking-wider animate-flicker text-center">{bossName}</div>
           <div className="w-72 h-4 bg-black border-2 border-blood rounded mx-auto mt-2 overflow-hidden">
@@ -663,6 +807,77 @@ export default function App() {
                 {breathPhase === 'fast' ? '💨 Respiro veloce' : '🌬️ Respiro lento'}
               </span>
             </div>
+          )}
+        </div>
+      )}
+
+      {phase === 'boss' && bossType === 'orologio-posseduto' && (
+        <div className="absolute inset-0 flex flex-col items-center justify-between p-4 sm:p-6 pointer-events-auto z-30">
+          {/* Top: boss name + HP bar */}
+          <div className="w-full max-w-md text-center">
+            <div className="text-red-500 font-horror text-2xl sm:text-3xl tracking-wider animate-flicker">{bossName}</div>
+            <div className="w-64 h-3 bg-black border-2 border-red-700 rounded mx-auto mt-2 overflow-hidden">
+              <div className="h-full bg-red-600 transition-all duration-200" style={{ width: `${(bossHp / BOSS_HP) * 100}%` }} />
+            </div>
+            <div className="text-bone/70 text-xs mt-1">{bossHp} HP — Round {possessedState.round}/{possessedState.totalRounds}</div>
+          </div>
+
+          {/* Middle: target time display */}
+          {possessedState.active && possessedState.result === 'pending' && (
+            <div className="text-center">
+              <div className="text-bone/50 text-xs sm:text-sm mb-1">Imposta le lancette su:</div>
+              <div className="font-horror text-red-400 text-3xl sm:text-5xl tracking-wider">
+                {possessedState.targetHour}:{possessedState.targetMinute < 10 ? '0' : ''}{possessedState.targetMinute}
+              </div>
+              <div className="text-bone/40 text-xs mt-2">
+                Tempo: {Math.max(0, Math.ceil((possessedState.deadline - performance.now()) / 1000))}s
+              </div>
+            </div>
+          )}
+
+          {/* Bottom: clock-setting controls */}
+          {possessedState.active && possessedState.result === 'pending' && (
+            <div className="w-full max-w-sm">
+              {/* Player's clock preview */}
+              <div className="flex items-center justify-center gap-6 mb-4">
+                <div className="text-center">
+                  <div className="text-bone/50 text-xs mb-1">Ora</div>
+                  <div className="font-clock text-bone text-3xl">{possessedState.playerHour}</div>
+                  <div className="flex gap-2 mt-1">
+                    <button onClick={() => adjustPossessedHand('hour', -1)}
+                      className="bg-zinc-800 hover:bg-red-900/50 text-bone w-10 h-10 rounded border border-red-700/40 text-lg">−</button>
+                    <button onClick={() => adjustPossessedHand('hour', 1)}
+                      className="bg-zinc-800 hover:bg-red-900/50 text-bone w-10 h-10 rounded border border-red-700/40 text-lg">+</button>
+                  </div>
+                </div>
+                <div className="text-bone/30 text-3xl">:</div>
+                <div className="text-center">
+                  <div className="text-bone/50 text-xs mb-1">Minuti</div>
+                  <div className="font-clock text-bone text-3xl">{possessedState.playerMinute < 10 ? '0' : ''}{possessedState.playerMinute}</div>
+                  <div className="flex gap-2 mt-1">
+                    <button onClick={() => adjustPossessedHand('minute', -5)}
+                      className="bg-zinc-800 hover:bg-red-900/50 text-bone w-10 h-10 rounded border border-red-700/40 text-lg">−</button>
+                    <button onClick={() => adjustPossessedHand('minute', 5)}
+                      className="bg-zinc-800 hover:bg-red-900/50 text-bone w-10 h-10 rounded border border-red-700/40 text-lg">+</button>
+                  </div>
+                </div>
+              </div>
+              <button onClick={submitPossessedAnswer}
+                className="w-full bg-red-700 hover:bg-red-600 text-bone py-3 rounded-lg font-clock tracking-widest border border-red-400/50 transition-all hover:scale-105">
+                CONFERMA ORARIO
+              </button>
+            </div>
+          )}
+
+          {/* Result feedback */}
+          {possessedState.result !== 'pending' && !possessedState.active && !possessedState.defeated && (
+            <div className={`text-center font-horror text-3xl ${possessedState.result === 'correct' ? 'text-green-400' : 'text-red-500 animate-pulse'}`}>
+              {possessedState.result === 'correct' ? '✓ CORRETTO' : '✗ SBAGLIATO'}
+            </div>
+          )}
+
+          {possessedState.defeated && (
+            <div className="text-center font-horror text-green-400 text-3xl animate-pulse">SCONFITTO</div>
           )}
         </div>
       )}
@@ -695,17 +910,17 @@ export default function App() {
       {slowMo && <div className="absolute top-1/2 left-8 text-cyan-300/60 text-xs animate-pulse">SLOW-MO</div>}
 
       {phase === 'powerup' && (
-        <div className="absolute inset-0 bg-black/85 flex flex-col items-center justify-center p-6">
-          <h2 className="font-horror text-blood text-4xl mb-2 tracking-wider">POTENZIAMENTO</h2>
-          <p className="text-bone/60 text-sm mb-6">Scegli un potere. L'ora {hour} incombe.</p>
-          <div className="flex flex-wrap gap-4 justify-center max-w-3xl">
+        <div className="absolute inset-0 bg-black/85 flex flex-col items-center justify-start sm:justify-center p-4 sm:p-6 overflow-auto" style={{ maxHeight: '100dvh' }}>
+          <h2 className="font-horror text-blood text-2xl sm:text-4xl mb-2 tracking-wider mt-4 sm:mt-0 shrink-0">POTENZIAMENTO</h2>
+          <p className="text-bone/60 text-xs sm:text-sm mb-4 text-center shrink-0">Scegli un potere. L'ora {hour} incombe.</p>
+          <div className="flex flex-col sm:flex-row flex-wrap gap-3 sm:gap-4 justify-center max-w-3xl w-full pb-6">
             {powerupChoices.map((id) => {
               const p = POWER_UPS[id]
               return (
                 <button key={id} onClick={() => choosePowerup(id)}
-                  className="w-64 bg-zinc-900 border-2 border-rust/40 hover:border-blood hover:bg-zinc-800 rounded-lg p-4 text-left transition-all hover:scale-105">
-                  <div className="text-3xl mb-2">{p.icon}</div>
-                  <div className="font-clock text-bone text-lg mb-1">{p.name}</div>
+                  className="w-full sm:w-64 bg-zinc-900 border-2 border-rust/40 hover:border-blood hover:bg-zinc-800 rounded-lg p-3 sm:p-4 text-left transition-all hover:scale-105">
+                  <div className="text-2xl sm:text-3xl mb-1 sm:mb-2">{p.icon}</div>
+                  <div className="font-clock text-bone text-base sm:text-lg mb-1">{p.name}</div>
                   <div className="text-bone/60 text-xs leading-snug">{p.desc}</div>
                 </button>
               )
@@ -715,37 +930,37 @@ export default function App() {
       )}
 
       {phase === 'merchant' && (
-        <div className="absolute inset-0 bg-black/90 flex flex-col items-center justify-center p-6">
-          <h2 className="font-horror text-purple-400 text-4xl mb-2 tracking-wider">L'OMBRA MERCANTE</h2>
-          <p className="text-bone/60 text-sm mb-2">Un'ombra incappucciata ti osserva. Offre tre doni. Costo: {MERCHANT_COST} secondi ciascuno.</p>
-          <p className="text-purple-300/70 text-xs mb-6">Questi acquisti valgono solo per questa partita.</p>
-          <div className="text-gold text-lg mb-6">⏳ {currency}s</div>
-          <div className="flex flex-wrap gap-4 justify-center max-w-3xl">
+        <div className="absolute inset-0 bg-black/90 flex flex-col items-center justify-start p-4 sm:p-6 overflow-auto" style={{ maxHeight: '100dvh' }}>
+          <h2 className="font-horror text-purple-400 text-2xl sm:text-4xl mb-2 tracking-wider mt-4 sm:mt-0 shrink-0">L'OMBRA MERCANTE</h2>
+          <p className="text-bone/60 text-xs sm:text-sm mb-2 text-center px-2 shrink-0">Un'ombra incappucciata ti osserva. Offre tre doni. Costo: {MERCHANT_COST} secondi ciascuno.</p>
+          <p className="text-purple-300/70 text-xs mb-4 text-center shrink-0">Questi acquisti valgono solo per questa partita.</p>
+          <div className="text-gold text-lg mb-4 shrink-0">⏳ {currency}s</div>
+          <div className="flex flex-col sm:flex-row flex-wrap gap-3 sm:gap-4 justify-center max-w-3xl w-full pb-4">
             <button onClick={buyMerchantHeart} disabled={!merchantState.heart || currency < MERCHANT_COST}
-              className="w-64 bg-zinc-900 border-2 border-purple-700/50 hover:border-purple-400 hover:bg-zinc-800 rounded-lg p-4 text-left transition-all hover:scale-105 disabled:opacity-30 disabled:cursor-not-allowed">
-              <div className="text-3xl mb-2">❤️</div>
-              <div className="font-clock text-bone text-lg mb-1">Cuore</div>
+              className="w-full sm:w-64 bg-zinc-900 border-2 border-purple-700/50 hover:border-purple-400 hover:bg-zinc-800 rounded-lg p-3 sm:p-4 text-left transition-all hover:scale-105 disabled:opacity-30 disabled:cursor-not-allowed">
+              <div className="text-2xl sm:text-3xl mb-1 sm:mb-2">❤️</div>
+              <div className="font-clock text-bone text-base sm:text-lg mb-1">Cuore</div>
               <div className="text-bone/60 text-xs leading-snug">Guarisce 100 HP immediatamente.</div>
               <div className="text-purple-300 text-sm mt-2">Costo: {MERCHANT_COST}s</div>
             </button>
             <button onClick={buyMerchantShield} disabled={!merchantState.shield || currency < MERCHANT_COST}
-              className="w-64 bg-zinc-900 border-2 border-purple-700/50 hover:border-purple-400 hover:bg-zinc-800 rounded-lg p-4 text-left transition-all hover:scale-105 disabled:opacity-30 disabled:cursor-not-allowed">
-              <div className="text-3xl mb-2">🛡️</div>
-              <div className="font-clock text-bone text-lg mb-1">Scudo</div>
+              className="w-full sm:w-64 bg-zinc-900 border-2 border-purple-700/50 hover:border-purple-400 hover:bg-zinc-800 rounded-lg p-3 sm:p-4 text-left transition-all hover:scale-105 disabled:opacity-30 disabled:cursor-not-allowed">
+              <div className="text-2xl sm:text-3xl mb-1 sm:mb-2">🛡️</div>
+              <div className="font-clock text-bone text-base sm:text-lg mb-1">Scudo</div>
               <div className="text-bone/60 text-xs leading-snug">Ricarica o aggiunge uno scudo (Batteria Maledetta).</div>
               <div className="text-purple-300 text-sm mt-2">Costo: {MERCHANT_COST}s</div>
             </button>
             {merchantState.powerup && (
               <button onClick={buyMerchantPowerup} disabled={currency < MERCHANT_COST}
-                className="w-64 bg-zinc-900 border-2 border-purple-700/50 hover:border-purple-400 hover:bg-zinc-800 rounded-lg p-4 text-left transition-all hover:scale-105 disabled:opacity-30 disabled:cursor-not-allowed">
-                <div className="text-3xl mb-2">{POWER_UPS[merchantState.powerup].icon}</div>
-                <div className="font-clock text-bone text-lg mb-1">{POWER_UPS[merchantState.powerup].name}</div>
+                className="w-full sm:w-64 bg-zinc-900 border-2 border-purple-700/50 hover:border-purple-400 hover:bg-zinc-800 rounded-lg p-3 sm:p-4 text-left transition-all hover:scale-105 disabled:opacity-30 disabled:cursor-not-allowed">
+                <div className="text-2xl sm:text-3xl mb-1 sm:mb-2">{POWER_UPS[merchantState.powerup].icon}</div>
+                <div className="font-clock text-bone text-base sm:text-lg mb-1">{POWER_UPS[merchantState.powerup].name}</div>
                 <div className="text-bone/60 text-xs leading-snug">{POWER_UPS[merchantState.powerup].desc}</div>
                 <div className="text-purple-300 text-sm mt-2">Costo: {MERCHANT_COST}s</div>
               </button>
             )}
           </div>
-          <div className="flex gap-4 mt-8">
+          <div className="flex gap-4 mt-4 mb-6 shrink-0">
             <button onClick={leaveMerchant}
               className="bg-zinc-800 hover:bg-zinc-700 text-bone px-6 py-3 rounded-lg font-clock tracking-widest border border-bone/20 transition-all hover:scale-105">
               Continua senza comprare nulla →
@@ -773,19 +988,19 @@ export default function App() {
       )}
 
       {phase === 'shop' && (
-        <div className="absolute inset-0 bg-black/95 flex flex-col items-center justify-center p-6 overflow-auto">
-          <div className="flex items-center justify-between w-full max-w-5xl mb-6">
-            <h2 className="font-horror text-gold text-4xl tracking-wider">NEGOZIO</h2>
-            <div className="text-gold text-2xl">⏳ {currency}s{currencyCapped ? ' (CAP)' : ''}</div>
+        <div className="absolute inset-0 bg-black/95 flex flex-col items-center justify-start p-4 sm:p-6 overflow-auto" style={{ maxHeight: '100dvh' }}>
+          <div className="flex items-center justify-between w-full max-w-5xl mb-4 mt-4 sm:mt-0 shrink-0">
+            <h2 className="font-horror text-gold text-2xl sm:text-4xl tracking-wider">NEGOZIO</h2>
+            <div className="text-gold text-lg sm:text-2xl">⏳ {currency}s{currencyCapped ? ' (CAP)' : ''}</div>
           </div>
-          {shopError && <div className="text-blood text-sm mb-4">{shopError}</div>}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 w-full max-w-5xl">
+          {shopError && <div className="text-blood text-sm mb-4 shrink-0">{shopError}</div>}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 w-full max-w-5xl pb-4">
             {ALL_UPGRADES.map((def) => (
               <ShopCard key={def.category} def={def} player={player} onBuy={() => buyUpgrade(def.category)} />
             ))}
           </div>
           <button onClick={() => setPhase('menu')}
-            className="mt-8 bg-zinc-800 hover:bg-zinc-700 text-bone px-6 py-3 rounded-lg font-clock tracking-widest border border-bone/20">← Torna al menu</button>
+            className="mt-4 mb-6 bg-zinc-800 hover:bg-zinc-700 text-bone px-6 py-3 rounded-lg font-clock tracking-widest border border-bone/20 shrink-0">← Torna al menu</button>
         </div>
       )}
 
@@ -834,9 +1049,9 @@ function ShopCard({ def, player, onBuy }: { def: UpgradeDef; player: PlayerState
   const affordable = nextTier ? (player?.currency ?? 0) >= nextTier.cost : false
 
   return (
-    <div className="bg-zinc-900 border-2 border-rust/40 rounded-lg p-5 flex flex-col">
-      <div className="text-4xl mb-2">{def.icon}</div>
-      <h3 className="font-clock text-bone text-xl mb-1">{def.name}</h3>
+    <div className="bg-zinc-900 border-2 border-rust/40 rounded-lg p-4 sm:p-5 flex flex-col">
+      <div className="text-3xl sm:text-4xl mb-2">{def.icon}</div>
+      <h3 className="font-clock text-bone text-lg sm:text-xl mb-1">{def.name}</h3>
       <p className="text-bone/50 text-xs mb-3 leading-snug">{def.description}</p>
       <div className="flex-1 space-y-1 mb-4">
         {def.tiers.map((t) => {
