@@ -67,6 +67,10 @@ interface GameState {
   possessed: PossessedState
   // Sveglia del Tempo: every 10 seconds, skip 5 minutes. 2% chance to go back 50 minutes.
   svegliaTempoTick: number
+  // Super Orologio: every 45 seconds, invulnerable for 10 seconds (auto).
+  superOrologioTick: number
+  superOrologioInvulnerable: boolean
+  superOrologioInvulnEnd: number
 }
 
 function makeInitial(maxHp: number, bellBonus: number, shieldCharges: number, luckBonus: number, extraLives: number): GameState {
@@ -87,6 +91,9 @@ function makeInitial(maxHp: number, bellBonus: number, shieldCharges: number, lu
     merchantSpawnedThisHour: false,
     possessed: { round: 0, totalRounds: 5, targetHour: 0, targetMinute: 0, playerHour: 0, playerMinute: 0, deadline: 0, active: false, result: 'pending', jumpscare: false, defeated: false, glitch: 0 },
     svegliaTempoTick: 0,
+    superOrologioTick: 0,
+    superOrologioInvulnerable: false,
+    superOrologioInvulnEnd: 0,
   }
 }
 
@@ -165,6 +172,10 @@ export default function App() {
 
   const registerMiss = useCallback(() => {
     const s = stateRef.current
+    // Super Orologio: invulnerable during the 10-second window.
+    if (s.superOrologioInvulnerable && performance.now() < s.superOrologioInvulnEnd) {
+      playDodge(); flash('🛡️ Super Orologio: danno bloccato!'); return
+    }
     if (s.occhioArmed) {
       s.occhioArmed = false; s.occhioAvailable = false
       playDodge(); flash('Occhio sul Quadrante: attacco schivato!'); syncUI(); return
@@ -323,7 +334,8 @@ export default function App() {
           s.bossType = null; s.breathPhase = 'none'; s.breathTimeScale = 1
           s.occhioAvailable = false; s.occhioArmed = false
           s.secondStart = now; s.lastClickBeat = -1
-          if (s.possessed.jumpscare) { stopPossessionLoop(); s.possessed = { ...s.possessed, jumpscare: false, defeated: true, active: false } }
+          stopPossessionLoop()
+          s.possessed = { ...s.possessed, jumpscare: false, defeated: true, active: false }
           flash('Hai sconfitto ' + (s.bossName ?? '') + '!'); playZombieScream(); playPowerup(); syncUI()
         }
         render()
@@ -344,7 +356,7 @@ export default function App() {
         playTick(currentBeat % 4 === 0)
         if (s.ghostSeconds > 0 && now < s.ghostSecondsEnd) handleAutoClick()
         if (s.owned.includes('lancetta-fantasma') && Math.random() < 0.3) handleAutoClick()
-        const horrorChance = s.owned.includes('meccanismo-corrotto') ? 0.08 : 0.03
+        const horrorChance = 0.03
         if (Math.random() < horrorChance) triggerHorrorEvent()
         // Sveglia del Tempo: every 10 seconds, skip 5 minutes. 2% chance to go back 50 minutes.
         if (s.owned.includes('sveglia-predatrice')) {
@@ -362,6 +374,22 @@ export default function App() {
         }
         if (s.minute >= 60) { s.minute -= 60; onHourRollover() }
         maybeSpawnMerchant()
+      }
+
+      // Super Orologio: every 45 seconds, invulnerable for 10 seconds.
+      if (s.owned.includes('tempo-rubato') && !s.superOrologioInvulnerable) {
+        s.superOrologioTick++
+        if (s.superOrologioTick >= 45) {
+          s.superOrologioTick = 0
+          s.superOrologioInvulnerable = true
+          s.superOrologioInvulnEnd = now + 10000
+          flash('🛡️ Super Orologio: invulnerabilità per 10 secondi!')
+          syncUI()
+        }
+      }
+      if (s.superOrologioInvulnerable && now >= s.superOrologioInvulnEnd) {
+        s.superOrologioInvulnerable = false
+        syncUI()
       }
 
       if (s.tempoRubatoActive && now >= s.tempoRubatoEnd) {
@@ -502,7 +530,6 @@ export default function App() {
   const onHourRollover = () => {
     const s = stateRef.current; s.hour++
     if (s.hour > TOTAL_HOURS) { win(); return }
-    if (s.owned.includes('tempo-rubato')) s.tempoRubatoAvailable = true
     s.merchantSpawnedThisHour = false
     s.merchantSpawnMinute = 1 + Math.floor(Math.random() * 59)
     if (BOSS_HOURS.includes(s.hour)) startBoss()
@@ -616,18 +643,11 @@ export default function App() {
     const s = stateRef.current
     switch (id) {
       case 'lancetta-instabile': s.perfectWindow = 160; break
-      case 'meccanismo-corrotto': s.perfectWindow = 180; break
+      case 'meccanismo-corrotto': s.luckPercent += 20; s.maxHp = Math.floor(s.maxHp / 2); s.hp = Math.min(s.hp, s.maxHp); break
       case 'batteria-maledetta': s.batteryShields += 1; break
-      case 'tempo-rubato': s.tempoRubatoAvailable = true; break
+      case 'tempo-rubato': break
       case 'sveglia-fortuna': s.luckPercent += 10; break
     }
-  }
-
-  const useTempoRubato = () => {
-    const s = stateRef.current
-    if (!s.tempoRubatoAvailable || s.tempoRubatoActive) return
-    s.tempoRubatoActive = true; s.tempoRubatoEnd = performance.now() + 3000; s.tempoRubatoAvailable = false
-    flash('Tempo Rubato: 3 secondi rallentati.'); syncUI()
   }
 
   const armOcchio = () => {
@@ -902,8 +922,11 @@ export default function App() {
       )}
 
       {owned.includes('tempo-rubato') && (phase === 'playing' || phase === 'boss') && (
-        <button onClick={useTempoRubato}
-          className="absolute bottom-8 right-8 bg-black/70 border border-rust/50 text-bone px-4 py-2 rounded hover:bg-rust/30 disabled:opacity-30 pointer-events-auto">⏳ Tempo Rubato</button>
+        <div className="absolute bottom-8 right-8 bg-black/70 border border-cyan-500/50 text-cyan-300 px-4 py-2 rounded pointer-events-none text-sm">
+          {stateRef.current.superOrologioInvulnerable
+            ? '🛡️ Invulnerabile: ' + Math.max(0, Math.ceil((stateRef.current.superOrologioInvulnEnd - performance.now()) / 1000)) + 's'
+            : '🛡️ Super Orologio: ' + (45 - stateRef.current.superOrologioTick) + 's'}
+        </div>
       )}
 
       {hasOcchio && phase === 'boss' && (
