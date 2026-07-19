@@ -9,7 +9,6 @@ export interface RenderOpts {
   lightOn: boolean
   flicker: boolean
   owned: string[]
-  ghostSecond: number
   shake: boolean
   crackIntensity: number
   bossName?: string
@@ -170,11 +169,6 @@ function drawClockPixel(ctx: CanvasRenderingContext2D, cx: number, cy: number, o
   drawHand(ctx, cx, cy, secAngle, 7, C.secHand)
   px(ctx, cx, cy, 1, 1, C.hand)
   px(ctx, cx, cy, 1, 1, C.secHand)
-  if (o.ghostSecond > 0) {
-    const a = 0.15 * Math.min(o.ghostSecond, 5)
-    ctx.fillStyle = `rgba(180,200,230,${a})`
-    ctx.beginPath(); ctx.arc(cx, cy, r + 4, 0, Math.PI * 2); ctx.fill()
-  }
   if (o.fakeSecondActive) {
     const pulse = 0.5 + Math.sin(Date.now() / 80) * 0.3
     ctx.strokeStyle = `rgba(200,30,30,${pulse})`; ctx.lineWidth = 1

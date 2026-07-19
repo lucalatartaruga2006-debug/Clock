@@ -28,7 +28,7 @@ interface GameState {
   hp: number; maxHp: number; hour: number; minute: number; phase: Phase
   owned: PowerUpId[]; batteryShields: number; cuoreUsed: boolean
   tempoRubatoAvailable: boolean; tempoRubatoActive: boolean; tempoRubatoEnd: number
-  ghostSeconds: number; ghostSecondsEnd: number; bossHp: number; bossBellTick: number
+  bossHp: number; bossBellTick: number
   fakeSecondActive: boolean; lightOn: boolean; flickerUntil: number
   perfectWindow: number; secondStart: number
   lastClickBeat: number
@@ -58,7 +58,7 @@ function makeInitial(maxHp: number, bellBonus: number, shieldCharges: number, lu
   return {
     hp: maxHp, maxHp, hour: 1, minute: 0, phase: 'menu', owned: [],
     batteryShields: shieldCharges, cuoreUsed: false, tempoRubatoAvailable: false,
-    tempoRubatoActive: false, tempoRubatoEnd: 0, ghostSeconds: 0, ghostSecondsEnd: 0,
+    tempoRubatoActive: false, tempoRubatoEnd: 0,
     bossHp: BOSS_HP, bossBellTick: 0, fakeSecondActive: false, lightOn: true,
     flickerUntil: 0, perfectWindow: PERFECT_WINDOW, secondStart: 0, lastClickBeat: -1, horrorEvents: 0,
     alarmVibrateUntil: 0, runCurrency: 0, bellBonus,
@@ -209,11 +209,12 @@ export default function App() {
     const s = stateRef.current
     if (s.bossType !== 'proprietario') return
     const hpRatio = s.hp / s.maxHp
-    let newPhase: BreathPhase = 'slow'
-    let newScale = 2
-    if (hpRatio <= 0.30) { newPhase = 'slow'; newScale = 2 }
-    else if (hpRatio <= 0.70) { newPhase = 'fast'; newScale = 0.5 }
-    else { newPhase = 'slow'; newScale = 2 }
+    // 100→70 HP: respiro veloce | 70→30 HP: respiro lento | 30→0 HP: respiro veloce
+    let newPhase: BreathPhase = 'fast'
+    let newScale = 0.5
+    if (hpRatio > 0.70) { newPhase = 'fast'; newScale = 0.5 }
+    else if (hpRatio > 0.30) { newPhase = 'slow'; newScale = 2 }
+    else { newPhase = 'fast'; newScale = 0.5 }
 
     if (newPhase !== s.breathPhase) {
       s.breathPhase = newPhase
@@ -248,20 +249,18 @@ export default function App() {
           }
           updateBreathPhase()
         }
-        let bossBeatInterval = SECOND_MS
-        if (s.bossType === 'proprietario') bossBeatInterval = SECOND_MS * s.breathTimeScale
-        const bossElapsed = now - s.secondStart
-        // Fake tick fires at the half-beat mark (0.5s, 1.5s, 2.5s...) — exactly
-        // 0.5s after each real tick, so the rhythm is consistent and confusing.
-        const halfSec = Math.floor(bossElapsed / (bossBeatInterval / 2))
+        const halfSec = Math.floor(now / 500)
         if (s.bossType === 'ticchettio' && halfSec !== lastHalfSecond) {
           if (halfSec % 2 === 1 && lastHalfSecond >= 0) {
             s.fakeSecondActive = true
             playFakeTick()
-            setTimeout(() => { stateRef.current.fakeSecondActive = false }, bossBeatInterval / 2)
+            setTimeout(() => { stateRef.current.fakeSecondActive = false }, 500)
           }
           lastHalfSecond = halfSec
         }
+        let bossBeatInterval = SECOND_MS
+        if (s.bossType === 'proprietario') bossBeatInterval = SECOND_MS * s.breathTimeScale
+        const bossElapsed = now - s.secondStart
         const bossBeat = Math.floor(bossElapsed / bossBeatInterval)
         if (bossBeat !== lastSecond) {
           if (lastSecond >= 0 && s.lastClickBeat < lastSecond) registerMiss()
@@ -299,7 +298,6 @@ export default function App() {
         if (lastSecond >= 0 && s.lastClickBeat < lastSecond) registerMiss()
         lastSecond = currentBeat
         playTick(currentBeat % 4 === 0)
-        if (s.ghostSeconds > 0 && now < s.ghostSecondsEnd) handleAutoClick()
         if (s.owned.includes('lancetta-fantasma') && Math.random() < 0.3) handleAutoClick()
         const horrorChance = s.owned.includes('meccanismo-corrotto') ? 0.08 : 0.03
         if (Math.random() < horrorChance) triggerHorrorEvent()
@@ -331,7 +329,7 @@ export default function App() {
       hp: s.hp, maxHp: s.maxHp, hour: s.hour, minute: s.minute,
       bossActive: s.phase === 'boss', bossHp: s.bossHp, bossMaxHp: BOSS_HP,
       lightOn: s.lightOn, flicker: performance.now() < s.flickerUntil,
-      owned: s.owned, ghostSecond: s.ghostSeconds,
+      owned: s.owned,
       shake: s.hp < 25 || s.phase === 'boss',
       crackIntensity: s.hp < 30 ? 1 - s.hp / 30 : 0,
       bossName: s.bossName, fakeSecondActive: s.fakeSecondActive,
@@ -350,7 +348,6 @@ export default function App() {
     const beat = Math.round(elapsed / SECOND_MS)
     s.lastClickBeat = Math.max(s.lastClickBeat, beat)
     s.minute++; s.runCurrency++
-    if (s.owned.includes('eco-del-secondo')) { s.ghostSeconds++; s.ghostSecondsEnd = now + 3000 }
     if (s.minute >= 60) { s.minute -= 60; onHourRollover() }
     maybeSpawnMerchant()
     syncUI()
@@ -396,11 +393,11 @@ export default function App() {
     s.lastClickBeat = Math.max(s.lastClickBeat, nearestTick)
 
     if (offset <= s.perfectWindow) {
-      s.minute++; s.runCurrency++
+      const bonus = s.owned.includes('secondo-perfetto') ? 2 : 1
+      s.minute += bonus; s.runCurrency += bonus
       if (s.minute >= 60) { s.minute -= 60; onHourRollover() }
       maybeSpawnMerchant()
       playClick(true); setLastPerfect(true)
-      if (s.owned.includes('eco-del-secondo')) { s.ghostSeconds++; s.ghostSecondsEnd = now + 3000 }
       if (s.owned.includes('sveglia-predatrice') && s.hp < 40) { s.hp = Math.min(s.maxHp, s.hp + 0.5) }
       syncUI()
     } else if (offset > s.perfectWindow * 2) {
@@ -456,9 +453,9 @@ export default function App() {
       s.bossType = 'proprietario'
       s.bossName = 'Il Proprietario della Stanza'
       s.lightOn = false
-      s.breathPhase = 'slow'; s.breathTimeScale = 2; s.breathCount = 1; s.breathIntensity = 1
+      s.breathPhase = 'fast'; s.breathTimeScale = 0.5; s.breathCount = 1; s.breathIntensity = 1
       s.lastBreathSound = performance.now()
-      playSlowBreath()
+      playFastBreath()
       flash('BOSS: ' + s.bossName + ' — la luce si spegne. Respira...')
     } else {
       s.bossType = 'ticchettio'
