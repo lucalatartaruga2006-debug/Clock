@@ -346,7 +346,7 @@ export default function App() {
       // Normal play: the clock advances.
       let timeScale = 1
       if (s.tempoRubatoActive && now < s.tempoRubatoEnd) timeScale = 0.4
-      if (s.owned.includes('ultimo-secondo') && s.hp < s.maxHp * 0.01) timeScale = Math.min(timeScale, 0.5)
+      if (s.owned.includes('ultimo-secondo') && s.hp < s.maxHp * 0.10) timeScale = Math.min(timeScale, 0.5)
       const elapsed = (now - s.secondStart) * timeScale
       const currentBeat = Math.floor(elapsed / SECOND_MS)
 
@@ -484,7 +484,7 @@ export default function App() {
     // Normal play: evaluate against the advancing clock.
     let timeScale = 1
     if (s.tempoRubatoActive && now < s.tempoRubatoEnd) timeScale = 0.4
-    if (s.owned.includes('ultimo-secondo') && s.hp < s.maxHp * 0.01) timeScale = Math.min(timeScale, 0.5)
+    if (s.owned.includes('ultimo-secondo') && s.hp < s.maxHp * 0.10) timeScale = Math.min(timeScale, 0.5)
     const elapsed = (now - s.secondStart) * timeScale
 
     const nearestTick = Math.round(elapsed / SECOND_MS)
