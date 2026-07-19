@@ -1,0 +1,329 @@
+let ctx: AudioContext | null = null
+let master: GainNode | null = null
+
+export function initAudio() {
+  if (ctx) return ctx
+  const AC = window.AudioContext || (window as any).webkitAudioContext
+  ctx = new AC()
+  master = ctx.createGain()
+  master.gain.value = 0.6
+  master.connect(ctx.destination)
+  return ctx
+}
+
+export function resumeAudio() {
+  if (ctx && ctx.state === 'suspended') ctx.resume()
+}
+
+function now() { return ctx!.currentTime }
+
+export function playTick(accent = false) {
+  if (!ctx || !master) return
+  const t = now()
+  const osc = ctx.createOscillator(); const g = ctx.createGain()
+  osc.type = 'square'
+  osc.frequency.setValueAtTime(accent ? 2400 : 1800, t)
+  osc.frequency.exponentialRampToValueAtTime(600, t + 0.03)
+  g.gain.setValueAtTime(accent ? 0.5 : 0.32, t)
+  g.gain.exponentialRampToValueAtTime(0.001, t + 0.05)
+  osc.connect(g).connect(master)
+  osc.start(t); osc.stop(t + 0.06)
+}
+
+export function playFakeTick() {
+  if (!ctx || !master) return
+  const t = now()
+  const osc = ctx.createOscillator(); const g = ctx.createGain()
+  osc.type = 'square'
+  osc.frequency.setValueAtTime(1500, t)
+  osc.frequency.exponentialRampToValueAtTime(500, t + 0.03)
+  g.gain.setValueAtTime(0.22, t)
+  g.gain.exponentialRampToValueAtTime(0.001, t + 0.05)
+  osc.connect(g).connect(master)
+  osc.start(t); osc.stop(t + 0.06)
+}
+
+export function playClick(perfect: boolean) {
+  if (!ctx || !master) return
+  const t = now()
+  const osc = ctx.createOscillator(); const g = ctx.createGain()
+  osc.type = perfect ? 'triangle' : 'sawtooth'
+  osc.frequency.setValueAtTime(perfect ? 880 : 220, t)
+  if (perfect) osc.frequency.exponentialRampToValueAtTime(1320, t + 0.04)
+  g.gain.setValueAtTime(perfect ? 0.4 : 0.25, t)
+  g.gain.exponentialRampToValueAtTime(0.001, t + 0.12)
+  osc.connect(g).connect(master)
+  osc.start(t); osc.stop(t + 0.14)
+  if (perfect) {
+    const o2 = ctx.createOscillator(); const g2 = ctx.createGain()
+    o2.type = 'sine'; o2.frequency.value = 1760
+    g2.gain.setValueAtTime(0.12, t)
+    g2.gain.exponentialRampToValueAtTime(0.001, t + 0.18)
+    o2.connect(g2).connect(master)
+    o2.start(t); o2.stop(t + 0.2)
+  }
+}
+
+export function playDamage() {
+  if (!ctx || !master) return
+  const t = now()
+  const osc = ctx.createOscillator(); const g = ctx.createGain()
+  osc.type = 'sawtooth'
+  osc.frequency.setValueAtTime(180, t)
+  osc.frequency.exponentialRampToValueAtTime(40, t + 0.25)
+  g.gain.setValueAtTime(0.5, t)
+  g.gain.exponentialRampToValueAtTime(0.001, t + 0.3)
+  osc.connect(g).connect(master)
+  osc.start(t); osc.stop(t + 0.32)
+  const buf = ctx.createBuffer(1, 4410, 44100)
+  const d = buf.getChannelData(0)
+  for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length)
+  const src = ctx.createBufferSource(); src.buffer = buf
+  const ng = ctx.createGain(); ng.gain.value = 0.25
+  src.connect(ng).connect(master); src.start(t)
+}
+
+export function playAlarmBuzz(duration = 2.5) {
+  if (!ctx || !master) return
+  const t = now()
+  const burstLen = 0.18
+  const gap = 0.04
+  const period = burstLen * 2 + gap * 2
+  const bursts = Math.floor(duration / period)
+  for (let b = 0; b < bursts; b++) {
+    const bt = t + b * period
+    const f1 = b % 2 === 0 ? 880 : 660
+    const osc = ctx.createOscillator(); const g = ctx.createGain()
+    osc.type = 'square'; osc.frequency.value = f1
+    g.gain.setValueAtTime(0, bt)
+    g.gain.linearRampToValueAtTime(0.35, bt + 0.005)
+    g.gain.setValueAtTime(0.35, bt + burstLen)
+    g.gain.exponentialRampToValueAtTime(0.001, bt + burstLen + 0.02)
+    osc.connect(g).connect(master)
+    osc.start(bt); osc.stop(bt + burstLen + 0.03)
+    const buf = ctx.createBuffer(1, Math.floor(44100 * burstLen), 44100)
+    const d = buf.getChannelData(0)
+    for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length) * 0.5
+    const src = ctx.createBufferSource(); src.buffer = buf
+    const ng = ctx.createGain(); ng.gain.value = 0.12
+    src.connect(ng).connect(master); src.start(bt)
+  }
+}
+
+export function playBell() {
+  if (!ctx || !master) return
+  const t = now()
+  ;[440, 660, 880].forEach((f, i) => {
+    const osc = ctx!.createOscillator(); const g = ctx!.createGain()
+    osc.type = 'triangle'; osc.frequency.value = f
+    g.gain.setValueAtTime(0.25 / (i + 1), t)
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.8)
+    osc.connect(g).connect(master!)
+    osc.start(t); osc.stop(t + 0.85)
+  })
+}
+
+export function playWhisper() {
+  if (!ctx || !master) return
+  const t = now()
+  const buf = ctx.createBuffer(1, 22050, 44100)
+  const d = buf.getChannelData(0)
+  for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.sin(i / 200) * 0.3
+  const src = ctx.createBufferSource(); src.buffer = buf
+  const filt = ctx.createBiquadFilter()
+  filt.type = 'bandpass'; filt.frequency.value = 800; filt.Q.value = 5
+  const g = ctx.createGain()
+  g.gain.setValueAtTime(0.15, t)
+  g.gain.exponentialRampToValueAtTime(0.001, t + 0.5)
+  src.connect(filt).connect(g).connect(master); src.start(t)
+}
+
+export function playPowerup() {
+  if (!ctx || !master) return
+  const t = now()
+  ;[523, 659, 784, 1047].forEach((f, i) => {
+    const osc = ctx!.createOscillator(); const g = ctx!.createGain()
+    osc.type = 'triangle'; osc.frequency.value = f
+    g.gain.setValueAtTime(0, t + i * 0.08)
+    g.gain.linearRampToValueAtTime(0.2, t + i * 0.08 + 0.02)
+    g.gain.exponentialRampToValueAtTime(0.001, t + i * 0.08 + 0.3)
+    osc.connect(g).connect(master!)
+    osc.start(t + i * 0.08); osc.stop(t + i * 0.08 + 0.35)
+  })
+}
+
+export function playPurchase() {
+  if (!ctx || !master) return
+  const t = now()
+  ;[659, 880, 1047].forEach((f, i) => {
+    const osc = ctx!.createOscillator(); const g = ctx!.createGain()
+    osc.type = 'triangle'; osc.frequency.value = f
+    g.gain.setValueAtTime(0, t + i * 0.06)
+    g.gain.linearRampToValueAtTime(0.18, t + i * 0.06 + 0.01)
+    g.gain.exponentialRampToValueAtTime(0.001, t + i * 0.06 + 0.2)
+    osc.connect(g).connect(master!)
+    osc.start(t + i * 0.06); osc.stop(t + i * 0.06 + 0.25)
+  })
+}
+
+export function playError() {
+  if (!ctx || !master) return
+  const t = now()
+  const osc = ctx.createOscillator(); const g = ctx.createGain()
+  osc.type = 'square'; osc.frequency.value = 120
+  g.gain.setValueAtTime(0.2, t)
+  g.gain.exponentialRampToValueAtTime(0.001, t + 0.2)
+  osc.connect(g).connect(master)
+  osc.start(t); osc.stop(t + 0.22)
+}
+
+export function playGameOver() {
+  if (!ctx || !master) return
+  const t = now()
+  const osc = ctx.createOscillator(); const g = ctx.createGain()
+  osc.type = 'sawtooth'
+  osc.frequency.setValueAtTime(220, t)
+  osc.frequency.exponentialRampToValueAtTime(30, t + 2)
+  g.gain.setValueAtTime(0.4, t)
+  g.gain.exponentialRampToValueAtTime(0.001, t + 2.2)
+  osc.connect(g).connect(master)
+  osc.start(t); osc.stop(t + 2.3)
+}
+
+export function playSlowBreath() {
+  if (!ctx || !master) return
+  const t = now()
+  const dur = 2.2
+  const buf = ctx.createBuffer(1, Math.floor(44100 * dur), 44100)
+  const d = buf.getChannelData(0)
+  for (let i = 0; i < d.length; i++) {
+    const phase = i / d.length
+    const env = phase < 0.5 ? phase * 2 : (1 - phase) * 2
+    d[i] = (Math.random() * 2 - 1) * env * 0.4
+  }
+  const src = ctx.createBufferSource(); src.buffer = buf
+  const filt = ctx.createBiquadFilter()
+  filt.type = 'lowpass'; filt.frequency.value = 300; filt.Q.value = 1
+  const g = ctx.createGain(); g.gain.value = 0.5
+  const osc = ctx.createOscillator(); const og = ctx.createGain()
+  osc.type = 'sine'; osc.frequency.setValueAtTime(70, t)
+  osc.frequency.linearRampToValueAtTime(55, t + dur)
+  og.gain.setValueAtTime(0, t)
+  og.gain.linearRampToValueAtTime(0.12, t + dur * 0.4)
+  og.gain.linearRampToValueAtTime(0, t + dur)
+  osc.connect(og).connect(master)
+  src.connect(filt).connect(g).connect(master)
+  src.start(t); osc.start(t); osc.stop(t + dur)
+}
+
+export function playFastBreath() {
+  if (!ctx || !master) return
+  const t = now()
+  const burstDur = 0.12
+  const gap = 0.06
+  const count = 6
+  for (let b = 0; b < count; b++) {
+    const bt = t + b * (burstDur + gap)
+    const buf = ctx.createBuffer(1, Math.floor(44100 * burstDur), 44100)
+    const d = buf.getChannelData(0)
+    for (let i = 0; i < d.length; i++) {
+      const env = (i / d.length) < 0.5 ? (i / d.length) * 2 : (1 - i / d.length) * 2
+      d[i] = (Math.random() * 2 - 1) * env * 0.5
+    }
+    const src = ctx.createBufferSource(); src.buffer = buf
+    const filt = ctx.createBiquadFilter()
+    filt.type = 'bandpass'; filt.frequency.value = 500 + b * 80; filt.Q.value = 2
+    const g = ctx.createGain(); g.gain.value = 0.4
+    src.connect(filt).connect(g).connect(master); src.start(bt)
+  }
+}
+
+export function playScream() {
+  if (!ctx || !master) return
+  const ac = ctx
+  const t = now()
+  const dur = 1.6
+  ;[1, 1.01].forEach((mult) => {
+    const osc = ac.createOscillator(); const g = ac.createGain()
+    osc.type = 'sawtooth'
+    osc.frequency.setValueAtTime(900 * mult, t)
+    osc.frequency.exponentialRampToValueAtTime(120 * mult, t + dur)
+    g.gain.setValueAtTime(0, t)
+    g.gain.linearRampToValueAtTime(0.35, t + 0.05)
+    g.gain.setValueAtTime(0.35, t + dur * 0.6)
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur)
+    const lfo = ac.createOscillator(); const lfoG = ac.createGain()
+    lfo.frequency.value = 14; lfoG.gain.value = 40
+    lfo.connect(lfoG).connect(osc.frequency)
+    osc.connect(g).connect(master!)
+    osc.start(t); osc.stop(t + dur); lfo.start(t); lfo.stop(t + dur)
+  })
+  const buf = ac.createBuffer(1, Math.floor(44100 * dur), 44100)
+  const d = buf.getChannelData(0)
+  for (let i = 0; i < d.length; i++) {
+    const env = 1 - i / d.length
+    d[i] = (Math.random() * 2 - 1) * env * 0.3
+  }
+  const src = ac.createBufferSource(); src.buffer = buf
+  const filt = ac.createBiquadFilter()
+  filt.type = 'highpass'; filt.frequency.value = 800
+  const ng = ac.createGain(); ng.gain.value = 0.4
+  src.connect(filt).connect(ng).connect(master); src.start(t)
+}
+
+export function playMerchant() {
+  if (!ctx || !master) return
+  const t = now()
+  ;[392, 523, 659, 784].forEach((f, i) => {
+    const osc = ctx!.createOscillator(); const g = ctx!.createGain()
+    osc.type = 'sine'; osc.frequency.value = f
+    g.gain.setValueAtTime(0, t + i * 0.12)
+    g.gain.linearRampToValueAtTime(0.15, t + i * 0.12 + 0.03)
+    g.gain.exponentialRampToValueAtTime(0.001, t + i * 0.12 + 0.6)
+    osc.connect(g).connect(master!)
+    osc.start(t + i * 0.12); osc.stop(t + i * 0.12 + 0.65)
+  })
+}
+
+export function playDodge() {
+  if (!ctx || !master) return
+  const t = now()
+  ;[880, 1320, 1760, 2640].forEach((f, i) => {
+    const osc = ctx!.createOscillator(); const g = ctx!.createGain()
+    osc.type = 'sine'; osc.frequency.value = f
+    g.gain.setValueAtTime(0, t + i * 0.04)
+    g.gain.linearRampToValueAtTime(0.15, t + i * 0.04 + 0.01)
+    g.gain.exponentialRampToValueAtTime(0.001, t + i * 0.04 + 0.4)
+    osc.connect(g).connect(master!)
+    osc.start(t + i * 0.04); osc.stop(t + i * 0.04 + 0.45)
+  })
+}
+
+export function playLuckDodge() {
+  if (!ctx || !master) return
+  const t = now()
+  ;[659, 988, 1319].forEach((f, i) => {
+    const osc = ctx!.createOscillator(); const g = ctx!.createGain()
+    osc.type = 'triangle'; osc.frequency.value = f
+    g.gain.setValueAtTime(0, t + i * 0.05)
+    g.gain.linearRampToValueAtTime(0.12, t + i * 0.05 + 0.01)
+    g.gain.exponentialRampToValueAtTime(0.001, t + i * 0.05 + 0.3)
+    osc.connect(g).connect(master!)
+    osc.start(t + i * 0.05); osc.stop(t + i * 0.05 + 0.35)
+  })
+}
+
+// Benedizione di Dio Sveglia — a divine chime when you revive from death.
+export function playRevive() {
+  if (!ctx || !master) return
+  const t = now()
+  ;[523, 659, 784, 1047, 1319, 1568].forEach((f, i) => {
+    const osc = ctx!.createOscillator(); const g = ctx!.createGain()
+    osc.type = 'sine'; osc.frequency.value = f
+    g.gain.setValueAtTime(0, t + i * 0.1)
+    g.gain.linearRampToValueAtTime(0.18, t + i * 0.1 + 0.02)
+    g.gain.exponentialRampToValueAtTime(0.001, t + i * 0.1 + 0.8)
+    osc.connect(g).connect(master!)
+    osc.start(t + i * 0.1); osc.stop(t + i * 0.1 + 0.85)
+  })
+}
