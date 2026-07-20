@@ -360,7 +360,7 @@ export function startPossessionLoop() {
   if (!possessionDone || !possessionBuffer) { loadBuffer(possessionUrl, 'possession').then(() => { if (possessionBuffer) startPossessionLoop() }); return }
   stopPossessionLoop()
   const src = ctx.createBufferSource(); src.buffer = possessionBuffer; src.loop = true
-  const g = ctx.createGain(); g.gain.value = 0.5
+  const g = ctx.createGain(); g.gain.value = 0.75
   src.connect(g).connect(master); src.start()
   possessionSrc = src; possessionGain = g
 }
@@ -425,7 +425,7 @@ export function startBgMusic() {
   if (!bgMusicBuffer) return
   if (bgMusicSrc) return
   const src = ctx.createBufferSource(); src.buffer = bgMusicBuffer; src.loop = true
-  const g = ctx.createGain(); g.gain.value = 0.30
+  const g = ctx.createGain(); g.gain.value = 0.36
   src.connect(g).connect(master); src.start()
   bgMusicSrc = src; bgMusicGain = g
 }
@@ -440,7 +440,7 @@ export function pauseBgMusic() {
 }
 
 export function resumeBgMusic() {
-  if (bgMusicGain && ctx) bgMusicGain.gain.linearRampToValueAtTime(0.30, ctx.currentTime + 0.5)
+  if (bgMusicGain && ctx) bgMusicGain.gain.linearRampToValueAtTime(0.36, ctx.currentTime + 0.5)
 }
 
 // === Menu ticking (wet ticking clock) — loops only while in the menu ===

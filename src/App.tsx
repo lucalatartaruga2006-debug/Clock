@@ -307,6 +307,9 @@ export default function App() {
           // Update countdown UI
           const secsLeft = Math.ceil(remaining / 1000)
           if (secsLeft !== oraZeroCountdown) setOraZeroCountdown(secsLeft)
+          // Boss HP drains linearly with the countdown — survive 120s and the boss dies.
+          s.bossHp = Math.max(0, BOSS_HP * (remaining / 120000))
+          setBossHp(Math.round(s.bossHp))
           // Eyes intensity increases as time runs out
           s.oraZeroEyesIntensity = 1 + (1 - remaining / 120000) * 0.5
           // Last 30 seconds: laughing, accelerated breath, increased horror
@@ -361,7 +364,8 @@ export default function App() {
             }
           }
           if (s.possessed.glitch > 0) s.possessed.glitch = Math.max(0, s.possessed.glitch - 0.02)
-          // Survival clicks: player must keep clicking every second
+          // Survival clicks: player must keep clicking every second to avoid damage.
+          // Boss HP drains automatically with the countdown — clicks only keep you alive.
           let bossBeatInterval = SECOND_MS
           if (s.oraZeroLaughing) bossBeatInterval = SECOND_MS * s.breathTimeScale
           const bossElapsed = now - s.secondStart
@@ -370,14 +374,6 @@ export default function App() {
             if (lastSecond >= 0 && s.lastClickBeat < lastSecond) registerMiss()
             lastSecond = bossBeat
             playTick(bossBeat % 4 === 0)
-            // Campana Demoniaca still works
-            if (s.owned.includes('campana-demoniaca')) {
-              s.bossBellTick++
-              if (s.bossBellTick % 10 === 0) {
-                const dmg = 10 + s.bellBonus
-                s.bossHp -= dmg; playBell()
-              }
-            }
           }
           syncUI()
           render()
@@ -1094,7 +1090,7 @@ export default function App() {
       )}
 
       {phase === 'boss' && bossType === 'ora-zero' && (
-        <div className="absolute inset-0 flex flex-col items-center justify-between p-4 sm:p-6 pointer-events-auto z-30">
+        <div className="absolute inset-0 flex flex-col items-center justify-between p-4 sm:p-6 pointer-events-none z-30">
           {/* Top: countdown + boss name */}
           <div className="w-full max-w-md text-center">
             <div className="text-red-500 font-horror text-2xl sm:text-3xl tracking-wider animate-flicker">L'ORA ZERO</div>
@@ -1102,6 +1098,10 @@ export default function App() {
               {oraZeroCountdown}s
             </div>
             <div className="text-bone/50 text-xs mt-1">Sopravvivi fino allo zero</div>
+            <div className="w-64 h-3 bg-black border-2 border-red-700 rounded mx-auto mt-2 overflow-hidden">
+              <div className="h-full bg-red-600 transition-all duration-200" style={{ width: `${(bossHp / BOSS_HP) * 100}%` }} />
+            </div>
+            <div className="text-bone/70 text-xs mt-1">{bossHp} HP</div>
           </div>
 
           {/* Middle: clock task if active */}
@@ -1119,7 +1119,7 @@ export default function App() {
 
           {/* Bottom: mechanical clock for clock tasks */}
           {possessedState.active && possessedState.result === 'pending' && (
-            <div className="w-full max-w-sm flex flex-col items-center gap-3">
+            <div className="w-full max-w-sm flex flex-col items-center gap-3 pointer-events-auto">
               <MechanicalClock
                 hour={possessedState.playerHour}
                 minute={possessedState.playerMinute}
