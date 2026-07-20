@@ -3,6 +3,7 @@ import zombieUrl from './assets/audio/dragon-studio-zombie-screech-sound-effect-
 import possessionUrl from './assets/audio/freesound_community-moan-12-you-are-all-mine-echo-low-pitch-34521.mp3'
 import bgMusicUrl from './assets/audio/soundreality-something-strange-160387.mp3'
 import horrorPadUrl from './assets/audio/soundreality-horror-pad-pitch-crowd-391598.mp3'
+import menuTickUrl from './assets/audio/wet-ticking-clock_120bpm_D_minor.wav'
 
 let ctx: AudioContext | null = null
 let master: GainNode | null = null
@@ -424,7 +425,7 @@ export function startBgMusic() {
   if (!bgMusicBuffer) return
   if (bgMusicSrc) return
   const src = ctx.createBufferSource(); src.buffer = bgMusicBuffer; src.loop = true
-  const g = ctx.createGain(); g.gain.value = 0.24
+  const g = ctx.createGain(); g.gain.value = 0.30
   src.connect(g).connect(master); src.start()
   bgMusicSrc = src; bgMusicGain = g
 }
@@ -439,7 +440,39 @@ export function pauseBgMusic() {
 }
 
 export function resumeBgMusic() {
-  if (bgMusicGain && ctx) bgMusicGain.gain.linearRampToValueAtTime(0.24, ctx.currentTime + 0.5)
+  if (bgMusicGain && ctx) bgMusicGain.gain.linearRampToValueAtTime(0.30, ctx.currentTime + 0.5)
+}
+
+// === Menu ticking (wet ticking clock) — loops only while in the menu ===
+let menuTickBuffer: AudioBuffer | null = null
+let menuTickDone = false
+let menuTickSrc: AudioBufferSourceNode | null = null
+let menuTickGain: GainNode | null = null
+
+function loadMenuTick(): Promise<void> {
+  if (!ctx) return Promise.resolve()
+  return fetch(menuTickUrl)
+    .then((r) => r.arrayBuffer())
+    .then((data) => ctx!.decodeAudioData(data))
+    .then((buf) => { menuTickBuffer = buf })
+    .catch(() => {})
+    .then(() => { menuTickDone = true })
+}
+
+export function startMenuTick() {
+  if (!ctx || !master) return
+  if (!menuTickDone) { loadMenuTick().then(() => { if (menuTickBuffer) startMenuTick() }); return }
+  if (!menuTickBuffer) return
+  if (menuTickSrc) return
+  const src = ctx.createBufferSource(); src.buffer = menuTickBuffer; src.loop = true
+  const g = ctx.createGain(); g.gain.value = 0.4
+  src.connect(g).connect(master); src.start()
+  menuTickSrc = src; menuTickGain = g
+}
+
+export function stopMenuTick() {
+  if (menuTickSrc) { try { menuTickSrc.stop() } catch {} ; menuTickSrc = null }
+  menuTickGain = null
 }
 
 // === Horror pad (for Boss 12 — L'Ora Zero) ===

@@ -8,6 +8,7 @@ import {
   playPurchase, playError, playSlowBreath, playFastBreath, playScream, playMerchant, playDodge, playLuckDodge, playRevive,
   preloadFileSounds, playAlarmFile, playZombieScream, startPossessionLoop, stopPossessionLoop,
   startBgMusic, stopBgMusic, pauseBgMusic, resumeBgMusic, startHorrorPad, stopHorrorPad,
+  startMenuTick, stopMenuTick,
 } from './audio'
 import { MechanicalClock } from './MechanicalClock'
 import { loadPlayerState, addCurrency, savePlayerState, type PlayerState } from './supabase'
@@ -902,6 +903,7 @@ export default function App() {
   const startGame = () => {
     initAudio(); resumeAudio()
     preloadFileSounds()
+    stopMenuTick()
     startBgMusic()
     if (!derived) return
     stateRef.current = makeInitial(
@@ -919,6 +921,8 @@ export default function App() {
   }
 
   const goToMenu = () => {
+    stopBgMusic()
+    startMenuTick()
     stateRef.current.phase = 'menu'
     setPhase('menu')
   }
@@ -956,6 +960,22 @@ export default function App() {
     const onResize = () => render()
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
+  }, [])
+
+  // Start menu ticking on first user interaction (browsers require a gesture for audio)
+  useEffect(() => {
+    const onFirstInteract = () => {
+      initAudio(); resumeAudio()
+      if (stateRef.current.phase === 'menu') startMenuTick()
+      window.removeEventListener('pointerdown', onFirstInteract)
+      window.removeEventListener('keydown', onFirstInteract)
+    }
+    window.addEventListener('pointerdown', onFirstInteract)
+    window.addEventListener('keydown', onFirstInteract)
+    return () => {
+      window.removeEventListener('pointerdown', onFirstInteract)
+      window.removeEventListener('keydown', onFirstInteract)
+    }
   }, [])
 
   const currency = player?.currency ?? 0
@@ -1224,7 +1244,7 @@ export default function App() {
           <div className="flex gap-4 mb-4">
             <button onClick={startGame}
               className="bg-blood hover:bg-red-900 text-bone px-8 py-4 rounded-lg text-xl font-clock tracking-widest border-2 border-bone/30 transition-all hover:scale-105">INIZIA</button>
-            <button onClick={() => setPhase('shop')}
+            <button onClick={() => { stopMenuTick(); setPhase('shop') }}
               className="bg-zinc-800 hover:bg-zinc-700 text-gold px-8 py-4 rounded-lg text-xl font-clock tracking-widest border-2 border-gold/40 transition-all hover:scale-105">🛒 NEGOZIO</button>
           </div>
           <div className="text-gold text-lg">⏳ Secondi: {playerLoading ? '...' : currency}{currencyCapped ? ' (CAP)' : ''}</div>
@@ -1244,7 +1264,7 @@ export default function App() {
               <ShopCard key={def.category} def={def} player={player} onBuy={() => buyUpgrade(def.category)} />
             ))}
           </div>
-          <button onClick={() => setPhase('menu')}
+          <button onClick={goToMenu}
             className="mt-4 mb-6 bg-zinc-800 hover:bg-zinc-700 text-bone px-6 py-3 rounded-lg font-clock tracking-widest border border-bone/20 shrink-0">← Torna al menu</button>
         </div>
       )}
