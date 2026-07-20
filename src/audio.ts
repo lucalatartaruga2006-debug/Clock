@@ -359,7 +359,7 @@ export function startPossessionLoop() {
   if (!possessionDone || !possessionBuffer) { loadBuffer(possessionUrl, 'possession').then(() => { if (possessionBuffer) startPossessionLoop() }); return }
   stopPossessionLoop()
   const src = ctx.createBufferSource(); src.buffer = possessionBuffer; src.loop = true
-  const g = ctx.createGain(); g.gain.value = 0.35
+  const g = ctx.createGain(); g.gain.value = 0.5
   src.connect(g).connect(master); src.start()
   possessionSrc = src; possessionGain = g
 }
@@ -424,7 +424,7 @@ export function startBgMusic() {
   if (!bgMusicBuffer) return
   if (bgMusicSrc) return
   const src = ctx.createBufferSource(); src.buffer = bgMusicBuffer; src.loop = true
-  const g = ctx.createGain(); g.gain.value = 0.12
+  const g = ctx.createGain(); g.gain.value = 0.18
   src.connect(g).connect(master); src.start()
   bgMusicSrc = src; bgMusicGain = g
 }
@@ -439,7 +439,7 @@ export function pauseBgMusic() {
 }
 
 export function resumeBgMusic() {
-  if (bgMusicGain && ctx) bgMusicGain.gain.linearRampToValueAtTime(0.12, ctx.currentTime + 0.5)
+  if (bgMusicGain && ctx) bgMusicGain.gain.linearRampToValueAtTime(0.18, ctx.currentTime + 0.5)
 }
 
 // === Horror pad (for Boss 12 — L'Ora Zero) ===
