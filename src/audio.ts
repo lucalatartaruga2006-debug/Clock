@@ -424,7 +424,7 @@ export function startBgMusic() {
   if (!bgMusicBuffer) return
   if (bgMusicSrc) return
   const src = ctx.createBufferSource(); src.buffer = bgMusicBuffer; src.loop = true
-  const g = ctx.createGain(); g.gain.value = 0.30
+  const g = ctx.createGain(); g.gain.value = 0.24
   src.connect(g).connect(master); src.start()
   bgMusicSrc = src; bgMusicGain = g
 }
@@ -439,7 +439,7 @@ export function pauseBgMusic() {
 }
 
 export function resumeBgMusic() {
-  if (bgMusicGain && ctx) bgMusicGain.gain.linearRampToValueAtTime(0.30, ctx.currentTime + 0.5)
+  if (bgMusicGain && ctx) bgMusicGain.gain.linearRampToValueAtTime(0.24, ctx.currentTime + 0.5)
 }
 
 // === Horror pad (for Boss 12 — L'Ora Zero) ===
