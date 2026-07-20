@@ -7,7 +7,7 @@ import {
   playAlarmBuzz, playBell, playWhisper, playPowerup, playGameOver,
   playPurchase, playError, playSlowBreath, playFastBreath, playScream, playMerchant, playDodge, playLuckDodge, playRevive,
   preloadFileSounds, playAlarmFile, playZombieScream, startPossessionLoop, stopPossessionLoop,
-  startBgMusic, stopBgMusic, pauseBgMusic, resumeBgMusic, startHorrorPad, stopHorrorPad,
+  startBgMusic, stopBgMusic, startHorrorPad, stopHorrorPad,
 } from './audio'
 import { MechanicalClock } from './MechanicalClock'
 import { loadPlayerState, addCurrency, savePlayerState, type PlayerState } from './supabase'
@@ -149,6 +149,16 @@ export default function App() {
     return () => { cancelled = true }
   }, [])
 
+  // Background music plays only in the menu, looping infinitely.
+  useEffect(() => {
+    if (phase === 'menu') {
+      initAudio(); resumeAudio()
+      startBgMusic()
+    } else {
+      stopBgMusic()
+    }
+  }, [phase])
+
   const derived = player ? computeStats(player.hp_tier, player.bell_tier, player.shield_tier, player.luck_tier, player.benedizione_tier) : null
 
   const syncUI = useCallback(() => {
@@ -232,7 +242,7 @@ export default function App() {
     s.phase = 'gameover'
     stopPossessionLoop()
     stopHorrorPad()
-    resumeBgMusic()
+    stopBgMusic()
     playScream()
     setTimeout(() => playGameOver(), 300)
     if (s.runCurrency > 0) {
@@ -245,7 +255,7 @@ export default function App() {
     const s = stateRef.current
     s.phase = 'win'; playPowerup()
     stopHorrorPad()
-    resumeBgMusic()
+    stopBgMusic()
     if (s.runCurrency > 0) {
       addCurrency(s.runCurrency).then((p) => setPlayer(p)).catch(() => {})
     }
@@ -294,7 +304,6 @@ export default function App() {
             s.bossHp = 0
             s.possessed.defeated = true
             stopHorrorPad()
-            resumeBgMusic()
             playZombieScream(); playPowerup()
             flash("L'ORA ZERO È SPEZZATA! Gli occhi rossi si frantumano...")
             s.phase = 'win'
@@ -701,7 +710,6 @@ export default function App() {
       s.oraZeroEyesIntensity = 1
       s.oraZeroLaughing = false
       s.possessed = { ...s.possessed, active: false, result: 'pending', jumpscare: false, defeated: false }
-      pauseBgMusic()
       startHorrorPad()
       playZombieScream()
       flash('BOSS FINALE: ' + s.bossName + ' — 120 secondi. Sopravvivi!')
@@ -902,7 +910,6 @@ export default function App() {
   const startGame = () => {
     initAudio(); resumeAudio()
     preloadFileSounds()
-    startBgMusic()
     if (!derived) return
     stateRef.current = makeInitial(
       BASE_MAX_HP + derived.maxHpBonus,
@@ -919,6 +926,7 @@ export default function App() {
   }
 
   const goToMenu = () => {
+    stopPossessionLoop(); stopHorrorPad()
     stateRef.current.phase = 'menu'
     setPhase('menu')
   }
