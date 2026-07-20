@@ -7,12 +7,13 @@ import {
   playAlarmBuzz, playBell, playWhisper, playPowerup, playGameOver,
   playPurchase, playError, playSlowBreath, playFastBreath, playScream, playMerchant, playDodge, playLuckDodge, playRevive,
   preloadFileSounds, playAlarmFile, playZombieScream, startPossessionLoop, stopPossessionLoop,
+  startBgMusic, stopBgMusic, pauseBgMusic, resumeBgMusic, startHorrorPad, stopHorrorPad,
 } from './audio'
 import { MechanicalClock } from './MechanicalClock'
 import { loadPlayerState, addCurrency, savePlayerState, type PlayerState } from './supabase'
 
 type Phase = 'menu' | 'shop' | 'playing' | 'powerup' | 'boss' | 'merchant' | 'gameover' | 'win' | 'possessed'
-type BossType = 'ticchettio' | 'proprietario' | 'orologio-posseduto' | null
+type BossType = 'ticchettio' | 'proprietario' | 'orologio-posseduto' | 'ora-zero' | null
 type BreathPhase = 'slow' | 'fast' | 'none'
 
 interface PossessedRound {
@@ -71,6 +72,11 @@ interface GameState {
   superOrologioTick: number
   superOrologioInvulnerable: boolean
   superOrologioInvulnEnd: number
+  // Boss Ora 12: L'Ora Zero — 120-second countdown final boss.
+  oraZeroDeadline: number
+  oraZeroClockTaskAt: number
+  oraZeroEyesIntensity: number
+  oraZeroLaughing: boolean
 }
 
 function makeInitial(maxHp: number, bellBonus: number, shieldCharges: number, luckBonus: number, extraLives: number): GameState {
@@ -94,6 +100,10 @@ function makeInitial(maxHp: number, bellBonus: number, shieldCharges: number, lu
     superOrologioTick: 0,
     superOrologioInvulnerable: false,
     superOrologioInvulnEnd: 0,
+    oraZeroDeadline: 0,
+    oraZeroClockTaskAt: 0,
+    oraZeroEyesIntensity: 0,
+    oraZeroLaughing: false,
   }
 }
 
@@ -120,6 +130,7 @@ export default function App() {
   const [luckPercent, setLuckPercent] = useState(0)
   const [extraLives, setExtraLives] = useState(0)
   const [possessedState, setPossessedState] = useState<PossessedState>({ round: 0, totalRounds: 5, targetHour: 0, targetMinute: 0, playerHour: 0, playerMinute: 0, deadline: 0, active: false, result: 'pending', jumpscare: false, defeated: false, glitch: 0 })
+  const [oraZeroCountdown, setOraZeroCountdown] = useState(120)
 
   const [player, setPlayer] = useState<PlayerState | null>(null)
   const [playerLoading, setPlayerLoading] = useState(true)
@@ -220,6 +231,8 @@ export default function App() {
     const s = stateRef.current
     s.phase = 'gameover'
     stopPossessionLoop()
+    stopHorrorPad()
+    resumeBgMusic()
     playScream()
     setTimeout(() => playGameOver(), 300)
     if (s.runCurrency > 0) {
@@ -231,6 +244,8 @@ export default function App() {
   const win = useCallback(() => {
     const s = stateRef.current
     s.phase = 'win'; playPowerup()
+    stopHorrorPad()
+    resumeBgMusic()
     if (s.runCurrency > 0) {
       addCurrency(s.runCurrency).then((p) => setPlayer(p)).catch(() => {})
     }
@@ -271,6 +286,103 @@ export default function App() {
       // (10 HP every 10 seconds). Clicks do NOT damage the boss — they only
       // keep you alive (missed clicks hurt you, perfect clicks do nothing to the boss).
       if (s.phase === 'boss') {
+        if (s.bossType === 'ora-zero') {
+          // === Boss 12: L'Ora Zero — 120-second countdown with combined mechanics ===
+          const remaining = s.oraZeroDeadline - now
+          if (remaining <= 0) {
+            // Player survived 120 seconds — boss defeated!
+            s.bossHp = 0
+            s.possessed.defeated = true
+            stopHorrorPad()
+            resumeBgMusic()
+            playZombieScream(); playPowerup()
+            flash("L'ORA ZERO È SPEZZATA! Gli occhi rossi si frantumano...")
+            s.phase = 'win'
+            win()
+            render()
+            rafRef.current = requestAnimationFrame(loop)
+            return
+          }
+          // Update countdown UI
+          const secsLeft = Math.ceil(remaining / 1000)
+          if (secsLeft !== oraZeroCountdown) setOraZeroCountdown(secsLeft)
+          // Eyes intensity increases as time runs out
+          s.oraZeroEyesIntensity = 1 + (1 - remaining / 120000) * 0.5
+          // Last 30 seconds: laughing, accelerated breath, increased horror
+          if (remaining < 30000 && !s.oraZeroLaughing) {
+            s.oraZeroLaughing = true
+            s.breathPhase = 'fast'; s.breathTimeScale = 0.5
+            flash("L'Ora Zero ride! Il ritmo accelera!")
+          }
+          if (s.oraZeroLaughing) {
+            const breathInterval = 500
+            if (now - s.lastBreathSound > breathInterval) {
+              s.lastBreathSound = now
+              playFastBreath()
+              if (Math.random() < 0.3) playZombieScream()
+            }
+          }
+          // Mechanic from Boss 3 (Ticchettio): fake ticks and light flicker
+          const halfSec = Math.floor(now / 500)
+          if (halfSec !== lastHalfSecond) {
+            if (halfSec % 2 === 1 && lastHalfSecond >= 0 && Math.random() < 0.3) {
+              s.fakeSecondActive = true
+              playFakeTick()
+              setTimeout(() => { stateRef.current.fakeSecondActive = false }, 500)
+            }
+            lastHalfSecond = halfSec
+          }
+          // Light flicker — randomly goes dark for 1-2 seconds
+          if (Math.random() < 0.01) {
+            s.lightOn = false
+            setTimeout(() => { stateRef.current.lightOn = true }, 1000 + Math.random() * 1000)
+          }
+          // Mechanic from Boss 9 (Possessed): clock-setting task every 5-10 seconds
+          if (!s.possessed.active && s.possessed.result === 'pending' && now >= s.oraZeroClockTaskAt) {
+            startOraZeroClockTask()
+          }
+          if (s.possessed.active && s.possessed.result === 'pending') {
+            if (now >= s.possessed.deadline) {
+              s.possessed.result = 'wrong'
+              s.possessed.active = false
+              s.possessed.glitch = 1
+              s.hp = Math.max(0, s.hp - 50)
+              playDamage(); playZombieScream()
+              flash('⏰ Troppo lento! -50 HP')
+              if (s.hp <= 0) { handleDeath() }
+              s.oraZeroClockTaskAt = now + 5000 + Math.random() * 5000
+              setTimeout(() => {
+                if (stateRef.current.phase === 'boss' && stateRef.current.bossType === 'ora-zero') {
+                  stateRef.current.possessed.result = 'pending'
+                  syncUI()
+                }
+              }, 1200)
+            }
+          }
+          if (s.possessed.glitch > 0) s.possessed.glitch = Math.max(0, s.possessed.glitch - 0.02)
+          // Survival clicks: player must keep clicking every second
+          let bossBeatInterval = SECOND_MS
+          if (s.oraZeroLaughing) bossBeatInterval = SECOND_MS * s.breathTimeScale
+          const bossElapsed = now - s.secondStart
+          const bossBeat = Math.floor(bossElapsed / bossBeatInterval)
+          if (bossBeat !== lastSecond) {
+            if (lastSecond >= 0 && s.lastClickBeat < lastSecond) registerMiss()
+            lastSecond = bossBeat
+            playTick(bossBeat % 4 === 0)
+            // Campana Demoniaca still works
+            if (s.owned.includes('campana-demoniaca')) {
+              s.bossBellTick++
+              if (s.bossBellTick % 10 === 0) {
+                const dmg = 10 + s.bellBonus
+                s.bossHp -= dmg; playBell()
+              }
+            }
+          }
+          syncUI()
+          render()
+          rafRef.current = requestAnimationFrame(loop)
+          return
+        }
         if (s.bossType === 'orologio-posseduto') {
           // Possessed boss: handle mini-game timing
           if (s.possessed.active && s.possessed.result === 'pending') {
@@ -433,6 +545,9 @@ export default function App() {
       possessedTargetMinute: s.possessed.targetMinute,
       possessedPlayerHour: s.possessed.playerHour,
       possessedPlayerMinute: s.possessed.playerMinute,
+      oraZeroActive: s.bossType === 'ora-zero' && s.phase === 'boss',
+      oraZeroCountdown: oraZeroCountdown,
+      oraZeroEyesIntensity: s.oraZeroEyesIntensity,
     }, W, H)
   }
 
@@ -457,12 +572,15 @@ export default function App() {
 
     // During the possessed boss, the mini-game uses on-screen buttons, not canvas clicks.
     if (s.phase === 'boss' && s.bossType === 'orologio-posseduto') return
+    // During ora-zero clock tasks, the MechanicalClock handles input.
+    if (s.phase === 'boss' && s.bossType === 'ora-zero' && s.possessed.active && s.possessed.result === 'pending') return
 
     // During boss fights, clicks keep you alive but do NOT damage the boss.
     // The boss can only be damaged by the Campana Demoniaca power-up.
     if (s.phase === 'boss') {
       let bossBeatInterval = SECOND_MS
       if (s.bossType === 'proprietario') bossBeatInterval = SECOND_MS * s.breathTimeScale
+      if (s.bossType === 'ora-zero' && s.oraZeroLaughing) bossBeatInterval = SECOND_MS * s.breathTimeScale
       const bossElapsed = now - s.secondStart
       const nearestBeat = Math.round(bossElapsed / bossBeatInterval)
       const offset = Math.abs(bossElapsed - nearestBeat * bossBeatInterval)
@@ -572,6 +690,22 @@ export default function App() {
         ps.jumpscare = false
         startPossessedRound()
       }, 2500)
+    } else if (s.hour === 12) {
+      // Boss Ora 12: L'Ora Zero — final boss, 120-second countdown, combined mechanics
+      s.bossType = 'ora-zero'
+      s.bossName = 'L\'Ora Zero'
+      s.bossHp = BOSS_HP
+      s.lightOn = false
+      s.oraZeroDeadline = performance.now() + 120000
+      s.oraZeroClockTaskAt = performance.now() + 5000 + Math.random() * 5000
+      s.oraZeroEyesIntensity = 1
+      s.oraZeroLaughing = false
+      s.possessed = { ...s.possessed, active: false, result: 'pending', jumpscare: false, defeated: false }
+      pauseBgMusic()
+      startHorrorPad()
+      playZombieScream()
+      flash('BOSS FINALE: ' + s.bossName + ' — 120 secondi. Sopravvivi!')
+      syncUI()
     } else {
       s.bossType = 'ticchettio'
       s.bossName = 'Il Ticchettio'
@@ -658,6 +792,24 @@ export default function App() {
   }
 
   // === Boss Ora 9: L'Orologio Posseduto — clock-setting mini-game ===
+  // === Boss 12: L'Ora Zero — clock-setting task (from Boss 9 mechanic) ===
+  const startOraZeroClockTask = () => {
+    const s = stateRef.current
+    if (s.bossType !== 'ora-zero') return
+    const targetHour = 1 + Math.floor(Math.random() * 12)
+    const targetMinute = Math.floor(Math.random() * 60)
+    s.possessed = {
+      ...s.possessed,
+      targetHour, targetMinute,
+      playerHour: 12, playerMinute: 0,
+      deadline: performance.now() + 10000,
+      active: true, result: 'pending', glitch: 0,
+    }
+    setPossessedState({ ...s.possessed })
+    flash('⏰ Imposta le lancette su: ' + targetHour + ':' + (targetMinute < 10 ? '0' : '') + targetMinute)
+    syncUI()
+  }
+
   const startPossessedRound = () => {
     const s = stateRef.current
     if (s.bossType !== 'orologio-posseduto') return
@@ -730,7 +882,18 @@ export default function App() {
     }
     setPossessedState({ ...s.possessed })
     setBossHp(s.bossHp)
-    // Always schedule the next round, even after revive — prevents softlock.
+    // For ora-zero: schedule next clock task after a delay
+    if (s.bossType === 'ora-zero') {
+      s.oraZeroClockTaskAt = performance.now() + 5000 + Math.random() * 5000
+      setTimeout(() => {
+        if (stateRef.current.phase === 'boss' && stateRef.current.bossType === 'ora-zero') {
+          stateRef.current.possessed.result = 'pending'
+          syncUI()
+        }
+      }, 1200)
+      return
+    }
+    // For possessed boss: always schedule the next round, even after revive — prevents softlock.
     setTimeout(() => {
       if (stateRef.current.phase === 'boss' && stateRef.current.bossType === 'orologio-posseduto') nextPossessedRound()
     }, 1200)
@@ -739,6 +902,7 @@ export default function App() {
   const startGame = () => {
     initAudio(); resumeAudio()
     preloadFileSounds()
+    startBgMusic()
     if (!derived) return
     stateRef.current = makeInitial(
       BASE_MAX_HP + derived.maxHpBonus,
@@ -905,6 +1069,57 @@ export default function App() {
 
           {possessedState.defeated && (
             <div className="text-center font-horror text-green-400 text-3xl animate-pulse">SCONFITTO</div>
+          )}
+        </div>
+      )}
+
+      {phase === 'boss' && bossType === 'ora-zero' && (
+        <div className="absolute inset-0 flex flex-col items-center justify-between p-4 sm:p-6 pointer-events-auto z-30">
+          {/* Top: countdown + boss name */}
+          <div className="w-full max-w-md text-center">
+            <div className="text-red-500 font-horror text-2xl sm:text-3xl tracking-wider animate-flicker">L'ORA ZERO</div>
+            <div className={`font-horror text-4xl sm:text-6xl mt-2 ${oraZeroCountdown <= 10 ? 'text-red-500 animate-pulse' : oraZeroCountdown <= 30 ? 'text-orange-400' : 'text-bone'}`}>
+              {oraZeroCountdown}s
+            </div>
+            <div className="text-bone/50 text-xs mt-1">Sopravvivi fino allo zero</div>
+          </div>
+
+          {/* Middle: clock task if active */}
+          {possessedState.active && possessedState.result === 'pending' && (
+            <div className="text-center">
+              <div className="text-bone/50 text-xs sm:text-sm mb-1">Imposta le lancette su:</div>
+              <div className="font-horror text-red-400 text-3xl sm:text-5xl tracking-wider">
+                {possessedState.targetHour}:{possessedState.targetMinute < 10 ? '0' : ''}{possessedState.targetMinute}
+              </div>
+              <div className="text-bone/40 text-xs mt-2">
+                Tempo: {Math.max(0, Math.ceil((possessedState.deadline - performance.now()) / 1000))}s
+              </div>
+            </div>
+          )}
+
+          {/* Bottom: mechanical clock for clock tasks */}
+          {possessedState.active && possessedState.result === 'pending' && (
+            <div className="w-full max-w-sm flex flex-col items-center gap-3">
+              <MechanicalClock
+                hour={possessedState.playerHour}
+                minute={possessedState.playerMinute}
+                onHourChange={(h) => { stateRef.current.possessed.playerHour = h; setPossessedState({ ...stateRef.current.possessed }); playTick() }}
+                onMinuteChange={(m) => { stateRef.current.possessed.playerMinute = m; setPossessedState({ ...stateRef.current.possessed }); playTick() }}
+                size={200}
+              />
+              <div className="font-clock text-bone text-lg">{possessedState.playerHour}:{possessedState.playerMinute < 10 ? '0' : ''}{possessedState.playerMinute}</div>
+              <button onClick={submitPossessedAnswer}
+                className="w-full bg-red-700 hover:bg-red-600 text-bone py-3 rounded-lg font-clock tracking-widest border border-red-400/50 transition-all hover:scale-105">
+                CONFERMA ORARIO
+              </button>
+            </div>
+          )}
+
+          {/* Result feedback */}
+          {possessedState.result !== 'pending' && !possessedState.active && !possessedState.defeated && (
+            <div className={`text-center font-horror text-3xl ${possessedState.result === 'correct' ? 'text-green-400' : 'text-red-500 animate-pulse'}`}>
+              {possessedState.result === 'correct' ? '✓ CORRETTO' : '✗ SBAGLIATO'}
+            </div>
           )}
         </div>
       )}

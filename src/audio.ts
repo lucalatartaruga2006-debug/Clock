@@ -1,6 +1,8 @@
 import alarmUrl from './assets/audio/freesound_community-generic-alarm-clock-86759.mp3'
 import zombieUrl from './assets/audio/dragon-studio-zombie-screech-sound-effect-312865.mp3'
 import possessionUrl from './assets/audio/freesound_community-moan-12-you-are-all-mine-echo-low-pitch-34521.mp3'
+import bgMusicUrl from './assets/audio/soundreality-something-strange-160387.mp3'
+import horrorPadUrl from './assets/audio/soundreality-horror-pad-pitch-crowd-391598.mp3'
 
 let ctx: AudioContext | null = null
 let master: GainNode | null = null
@@ -398,4 +400,76 @@ export function playRevive() {
     osc.connect(g).connect(master!)
     osc.start(t + i * 0.1); osc.stop(t + i * 0.1 + 0.85)
   })
+}
+
+// === Background music (something strange) — low volume, loops during normal play ===
+let bgMusicBuffer: AudioBuffer | null = null
+let bgMusicDone = false
+let bgMusicSrc: AudioBufferSourceNode | null = null
+let bgMusicGain: GainNode | null = null
+
+function loadBgMusic(): Promise<void> {
+  if (!ctx) return Promise.resolve()
+  return fetch(bgMusicUrl)
+    .then((r) => r.arrayBuffer())
+    .then((data) => ctx!.decodeAudioData(data))
+    .then((buf) => { bgMusicBuffer = buf })
+    .catch(() => {})
+    .then(() => { bgMusicDone = true })
+}
+
+export function startBgMusic() {
+  if (!ctx || !master) return
+  if (!bgMusicDone) { loadBgMusic().then(() => { if (bgMusicBuffer) startBgMusic() }); return }
+  if (!bgMusicBuffer) return
+  if (bgMusicSrc) return
+  const src = ctx.createBufferSource(); src.buffer = bgMusicBuffer; src.loop = true
+  const g = ctx.createGain(); g.gain.value = 0.12
+  src.connect(g).connect(master); src.start()
+  bgMusicSrc = src; bgMusicGain = g
+}
+
+export function stopBgMusic() {
+  if (bgMusicSrc) { try { bgMusicSrc.stop() } catch {} ; bgMusicSrc = null }
+  bgMusicGain = null
+}
+
+export function pauseBgMusic() {
+  if (bgMusicGain && ctx) bgMusicGain.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.5)
+}
+
+export function resumeBgMusic() {
+  if (bgMusicGain && ctx) bgMusicGain.gain.linearRampToValueAtTime(0.12, ctx.currentTime + 0.5)
+}
+
+// === Horror pad (for Boss 12 — L'Ora Zero) ===
+let horrorPadBuffer: AudioBuffer | null = null
+let horrorPadDone = false
+let horrorPadSrc: AudioBufferSourceNode | null = null
+let horrorPadGain: GainNode | null = null
+
+function loadHorrorPad(): Promise<void> {
+  if (!ctx) return Promise.resolve()
+  return fetch(horrorPadUrl)
+    .then((r) => r.arrayBuffer())
+    .then((data) => ctx!.decodeAudioData(data))
+    .then((buf) => { horrorPadBuffer = buf })
+    .catch(() => {})
+    .then(() => { horrorPadDone = true })
+}
+
+export function startHorrorPad() {
+  if (!ctx || !master) return
+  if (!horrorPadDone) { loadHorrorPad().then(() => { if (horrorPadBuffer) startHorrorPad() }); return }
+  if (!horrorPadBuffer) return
+  if (horrorPadSrc) return
+  const src = ctx.createBufferSource(); src.buffer = horrorPadBuffer; src.loop = true
+  const g = ctx.createGain(); g.gain.value = 0.4
+  src.connect(g).connect(master); src.start()
+  horrorPadSrc = src; horrorPadGain = g
+}
+
+export function stopHorrorPad() {
+  if (horrorPadSrc) { try { horrorPadSrc.stop() } catch {} ; horrorPadSrc = null }
+  horrorPadGain = null
 }

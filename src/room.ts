@@ -28,6 +28,9 @@ export interface RenderOpts {
   possessedTargetMinute: number
   possessedPlayerHour: number
   possessedPlayerMinute: number
+  oraZeroActive: boolean
+  oraZeroCountdown: number
+  oraZeroEyesIntensity: number
 }
 
 const VW = 180
@@ -109,7 +112,8 @@ function drawScene(ctx: CanvasRenderingContext2D, o: RenderOpts) {
   }
   drawClockPixel(ctx, clockX, clockCY, o)
 
-  if (o.proprietarioActive) drawProprietarioPixel(ctx, o)
+  if (o.oraZeroActive) drawOraZeroPixel(ctx, o)
+  else if (o.proprietarioActive) drawProprietarioPixel(ctx, o)
   else if (o.possessedActive) drawPossessedBossPixel(ctx, o)
   else if (o.bossActive) drawBossPixel(ctx, clockX, clockCY, o)
 
@@ -118,7 +122,7 @@ function drawScene(ctx: CanvasRenderingContext2D, o: RenderOpts) {
   if (o.possessedJumpscare) drawJumpscarePixel(ctx)
   if (o.crackIntensity > 0) drawCracksPixel(ctx, o.crackIntensity)
   if (o.possessedGlitch > 0) drawGlitchPixel(ctx, o.possessedGlitch)
-  drawVignette(ctx, o.hour, o.bossActive || o.proprietarioActive || o.possessedActive)
+  drawVignette(ctx, o.hour, o.bossActive || o.proprietarioActive || o.possessedActive || o.oraZeroActive)
   drawDust(ctx)
 }
 
@@ -405,5 +409,62 @@ function drawDust(ctx: CanvasRenderingContext2D) {
     const y = (VH * 0.3) + ((t * 8 + i * 20) % (VH * 0.4))
     const a = 0.15 + Math.sin(t + i) * 0.1
     px(ctx, x, y, 1, 1, `rgba(120,110,90,${a})`)
+  }
+}
+
+function drawOraZeroPixel(ctx: CanvasRenderingContext2D, o: RenderOpts) {
+  const t = Date.now() / 1000
+  // Near-total darkness — only the clock is dimly lit
+  ctx.fillStyle = '#000000'; ctx.fillRect(0, 0, VW, VH)
+  // Faint clock glow
+  const clockX = VW / 2, clockCY = VH * 0.42
+  const glowR = 30 + Math.sin(t * 2) * 3
+  const grad = ctx.createRadialGradient(clockX, clockCY, 0, clockX, clockCY, glowR)
+  grad.addColorStop(0, 'rgba(80,20,20,0.3)')
+  grad.addColorStop(1, 'rgba(0,0,0,0)')
+  ctx.fillStyle = grad; ctx.fillRect(0, 0, VW, VH)
+  // Draw the clock faintly
+  const clockR = 18
+  ctx.strokeStyle = '#3a1010'; ctx.lineWidth = 1
+  ctx.beginPath(); ctx.arc(clockX, clockCY, clockR, 0, Math.PI * 2); ctx.stroke()
+  ctx.fillStyle = '#1a0808'; ctx.beginPath(); ctx.arc(clockX, clockCY, clockR - 2, 0, Math.PI * 2); ctx.fill()
+  // Clock hands
+  const ha = (o.hour % 12) / 12 * Math.PI * 2 - Math.PI / 2
+  const ma = o.minute / 60 * Math.PI * 2 - Math.PI / 2
+  ctx.strokeStyle = '#5a2020'; ctx.lineWidth = 1
+  ctx.beginPath(); ctx.moveTo(clockX, clockCY)
+  ctx.lineTo(clockX + Math.cos(ha) * clockR * 0.5, clockCY + Math.sin(ha) * clockR * 0.5); ctx.stroke()
+  ctx.beginPath(); ctx.moveTo(clockX, clockCY)
+  ctx.lineTo(clockX + Math.cos(ma) * clockR * 0.7, clockCY + Math.sin(ma) * clockR * 0.7); ctx.stroke()
+  // Two enormous red eyes watching
+  const eyeY = VH * 0.25
+  const eyeSpacing = 25
+  const intensity = o.oraZeroEyesIntensity
+  const flicker = 0.7 + Math.sin(t * 8) * 0.3
+  for (const side of [-1, 1]) {
+    const ex = VW / 2 + side * eyeSpacing
+    // Eye glow
+    const eg = ctx.createRadialGradient(ex, eyeY, 0, ex, eyeY, 12)
+    eg.addColorStop(0, `rgba(255,0,0,${0.6 * intensity * flicker})`)
+    eg.addColorStop(0.5, `rgba(180,0,0,${0.3 * intensity * flicker})`)
+    eg.addColorStop(1, 'rgba(0,0,0,0)')
+    ctx.fillStyle = eg; ctx.fillRect(ex - 15, eyeY - 10, 30, 20)
+    // Eye pupil
+    ctx.fillStyle = `rgba(255,${20 + Math.sin(t * 3) * 20},0,${intensity * flicker})`
+    ctx.beginPath(); ctx.ellipse(ex, eyeY, 5, 7, 0, 0, Math.PI * 2); ctx.fill()
+  }
+  // Glitch lines in last 30 seconds
+  if (o.oraZeroCountdown < 30) {
+    for (let i = 0; i < 3; i++) {
+      const gy = Math.random() * VH
+      const gh = 1 + Math.random() * 3
+      ctx.fillStyle = `rgba(255,0,0,${0.1 + Math.random() * 0.2})`
+      ctx.fillRect(0, gy, VW, gh)
+    }
+  }
+  // Countdown text area (rendered in React overlay, but add visual tension)
+  if (o.oraZeroCountdown < 10) {
+    ctx.fillStyle = `rgba(255,0,0,${0.3 + Math.sin(t * 10) * 0.2})`
+    ctx.fillRect(0, VH - 4, VW, 4)
   }
 }
